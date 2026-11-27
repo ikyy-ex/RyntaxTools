@@ -1,0 +1,102 @@
+[
+  {
+    "title": "Nasi Goreng Sederhana",
+    "desc": "Nasi goreng bumbu dasar, siap 10 menit.",
+    "ing": [
+      "2 piring nasi",
+      "2 siung bawang putih",
+      "3 siung bawang merah",
+      "2 sdm kecap manis",
+      "1 butir telur",
+      "garam & kaldu"
+    ],
+    "steps": [
+      "Haluskan bawang, tumis hingga harum.",
+      "Masukkan telur, orak-arik.",
+      "Tambahkan nasi, kecap, garam, dan kaldu.",
+      "Aduk rata hingga panas, sajikan."
+    ]
+  },
+  {
+    "title": "Telur Dadar Padat",
+    "desc": "Telur dadar tebal ala warung.",
+    "ing": [
+      "3 butir telur",
+      "1 batang daun bawang",
+      "1 sdm tepung terigu",
+      "garam, merica"
+    ],
+    "steps": [
+      "Kocok telur dengan semua bahan.",
+      "Panaskan minyak, tuang adonan.",
+      "Masak api kecil, balik, angkat saat kecokelatan."
+    ]
+  },
+  {
+    "title": "Mie Goreng Jawa",
+    "desc": "Mie goreng manis gurih.",
+    "ing": [
+      "2 bungkus mie telur",
+      "1 butir telur",
+      "sawi hijau",
+      "3 sdm kecap manis",
+      "bawang putih & merah"
+    ],
+    "steps": [
+      "Rebus mie setengah matang, tiriskan.",
+      "Tumis bumbu halus, masukkan telur.",
+      "Masukkan mie, sawi, dan kecap.",
+      "Aduk hingga matang merata."
+    ]
+  },
+  {
+    "title": "Sayur Sop Hangat",
+    "desc": "Kuah bening segar dengan sayuran.",
+    "ing": [
+      "wortel",
+      "kentang",
+      "kol",
+      "seledri",
+      "bawang putih",
+      "garam, merica"
+    ],
+    "steps": [
+      "Didihkan air dengan bawang putih geprek.",
+      "Masukkan wortel dan kentang hingga empuk.",
+      "Tambahkan kol, garam, merica.",
+      "Taburi seledri sebelum disajikan."
+    ]
+  },
+  {
+    "title": "Tempe Orek Kecap",
+    "desc": "Lauk manis pedas tahan lama.",
+    "ing": [
+      "200 g tempe",
+      "3 sdm kecap manis",
+      "cabai",
+      "bawang merah & putih",
+      "gula, garam"
+    ],
+    "steps": [
+      "Potong tempe dadu, goreng setengah kering.",
+      "Tumis bumbu iris hingga harum.",
+      "Masukkan tempe, kecap, gula, garam.",
+      "Aduk hingga bumbu meresap."
+    ]
+  },
+  {
+    "title": "Es Teh Manis Segar",
+    "desc": "Minuman klasik untuk cuaca panas.",
+    "ing": [
+      "2 kantong teh",
+      "500 ml air panas",
+      "3 sdm gula",
+      "es batu"
+    ],
+    "steps": [
+      "Seduh teh dengan air panas 3 menit.",
+      "Larutkan gula ke dalam teh.",
+      "Tuang ke gelas berisi es batu."
+    ]
+  }
+]
