@@ -1374,7 +1374,7 @@ function serviceTool(c) {
   registerTool({
     id: c.id, name: c.name, category: 'Downloader', badge: c.badge, description: c.description, keywords: c.keywords, icon: c.icon,
     mount(root) {
-      root.innerHTML = fieldGrid(c.fields, 'sv-') + '<div class="mt-4"><button id="sv-go" class="btn btn-primary" type="button">' + c.action + '</button></div><p id="sv-status" class="text-sm mt-3 font-semibold" aria-live="polite"></p><h3 class="font-extrabold mt-5 mb-2">Riwayat</h3><ul id="sv-hist" class="grid gap-2"></ul>';
+      root.innerHTML = fieldGrid(c.fields, 'sv-') + '<div class="mt-4"><button id="sv-go" class="btn btn-primary" type="button">' + c.action + '</button></div><p id="sv-status" class="text-sm mt-3 font-semibold" aria-live="polite"></p>' + (c.id === 'youtube-dl' ? '<section id="sv-yt-result" class="hidden stat mt-4" aria-live="polite"></section><p class="muted text-xs mt-3">Gunakan hanya untuk video/audio milik Anda atau yang memang diizinkan pemilik haknya. Hasil unduhan disediakan oleh backend Ryntax.</p>' : '') + '<h3 class="font-extrabold mt-5 mb-2">Riwayat</h3><ul id="sv-hist" class="grid gap-2"></ul>';
       const $ = s => Util.$(s, root), KEY = 'alltools-hist-' + c.id; let hist = [];
       try { hist = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { hist = []; }
       const save = () => { try { localStorage.setItem(KEY, JSON.stringify(hist.slice(0, 15))); } catch (e) { /* abaikan */ } };
@@ -1390,10 +1390,42 @@ function serviceTool(c) {
         if (!ep) { st.style.color = '#b86b00'; st.textContent = 'Endpoint belum diatur (mode placeholder). Isi ENDPOINTS.' + c.key + ' di kode.'; log(label, 'Menunggu endpoint'); return; }
         st.style.color = 'inherit'; st.textContent = 'Memproses...';
         try {
-          const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); const d = await r.json();
-          if (!r.ok || d.status === 'error') throw new Error(d.message || 'Gagal');
-          st.style.color = '#1f8a4c'; st.textContent = 'Selesai' + (d.title ? ': ' + d.title : ''); log(label, 'Selesai', /^https?:\/\//.test(d.download_url || '') ? d.download_url : '');
-        } catch (e) { st.style.color = '#d93a3a'; st.textContent = e && e.message ? e.message : 'Gagal memproses. Periksa endpoint dan CORS.'; log(label, 'Gagal'); }
+          const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
+          const d = await r.json();
+          if (!r.ok || d.status === 'error') throw new Error(d.message || d.error || ('HTTP ' + r.status));
+
+          // Tampilan hasil khusus YouTube. Tool downloader lain tetap memakai alur lama.
+          if (c.id === 'youtube-dl') {
+            const downloadUrl = d.download_url || d.url || (d.data && (d.data.download_url || d.data.url)) || '';
+            if (!/^https?:\/\//i.test(downloadUrl)) {
+              throw new Error('Backend YouTube belum mengirim tautan download_url yang valid. Periksa fungsi /.netlify/functions/youtube.');
+            }
+            const title = d.title || 'File siap diunduh';
+            const format = String(d.format || v.format || '').toUpperCase();
+            const safe = x => String(x).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+            const thumb = /^https?:\/\//i.test(d.thumbnail || '') ? '<img src="' + safe(d.thumbnail) + '" alt="" loading="lazy" class="w-full rounded-lg mb-3" style="max-height:190px;object-fit:cover">' : '';
+            const meta = [format, d.duration, d.filesize || d.file_size].filter(Boolean).map(safe).join(' · ');
+            const box = $('#sv-yt-result');
+            box.innerHTML = thumb + '<b class="block text-lg break-words">' + safe(title) + '</b>' +
+              (meta ? '<p class="muted text-sm mt-1">' + meta + '</p>' : '') +
+              '<a class="btn btn-primary inline-flex mt-3" href="' + safe(downloadUrl) + '" target="_blank" rel="noopener noreferrer" download>Unduh ' + (format || 'file') + '</a>' +
+              '<p class="muted text-xs mt-2 break-all">Jika unduhan tidak dimulai otomatis, buka tautan unduhan di atas.</p>';
+            box.classList.remove('hidden');
+          }
+
+          st.style.color = '#1f8a4c';
+          st.textContent = 'Selesai' + (d.title ? ': ' + d.title : '');
+          const savedUrl = d.download_url || d.url || (d.data && (d.data.download_url || d.data.url)) || '';
+          log(label, 'Selesai', /^https?:\/\//i.test(savedUrl) ? savedUrl : '');
+        } catch (e) {
+          if (c.id === 'youtube-dl') {
+            const box = $('#sv-yt-result');
+            if (box) { box.classList.add('hidden'); box.textContent = ''; }
+          }
+          st.style.color = '#d93a3a';
+          st.textContent = e && e.message ? e.message : 'Gagal memproses. Periksa endpoint dan CORS.';
+          log(label, 'Gagal');
+        }
       });
       render();
     }
