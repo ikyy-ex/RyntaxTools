@@ -1334,7 +1334,7 @@ registerTool({
 /* ---------- Pabrik tool layanan (endpoint eksternal) ----------
    Isi URL backend milik Anda pada ENDPOINTS. Kontrak yang diharapkan:
    POST {endpoint}  body JSON berisi nilai kolom  →  balasan {"status":"ok","title":"...","download_url":"https://..."} */
-const ENDPOINTS = { instants: '', tiktok: '', instagram: '', youtube: '', nokos: '', tts: '/.netlify/functions/tts', foto: '/.netlify/functions/upload', file: '/.netlify/functions/upload', proxy: '/.netlify/functions/proxy?url=', rembg: '/.netlify/functions/rembg', gemini: '/.netlify/functions/gemini', resep: '/api/resep', music: '/api/music', tube: '/.netlify/functions/tube', manga: '/api/katalog/manga', bola: '', berita: '', clips: '/api/katalog/clips', deploy: '/api/deploy', preset: '/api/katalog/preset', bilibili: '/api/katalog/bilibili', pinterest: '/api/pinterest', npsn: '/api/katalog/npsn', drama: '/api/katalog/drama', wacheck: '/api/wacheck', qris: location.protocol === 'file:' ? '' : location.origin };
+const ENDPOINTS = { instants: '', tiktok: '/.netlify/functions/tiktok', instagram: '/.netlify/functions/instagram', youtube: '/.netlify/functions/youtube', nokos: '/.netlify/functions/nokos', tts: '/.netlify/functions/tts', foto: '/.netlify/functions/upload', file: '/.netlify/functions/upload', proxy: '/.netlify/functions/proxy?url=', rembg: '/.netlify/functions/rembg', gemini: '/.netlify/functions/gemini', resep: '/api/resep', music: '/api/music', tube: '/.netlify/functions/tube', manga: '/api/katalog/manga', bola: '', berita: '', clips: '/api/katalog/clips', deploy: '/api/deploy', preset: '/api/katalog/preset', bilibili: '/api/katalog/bilibili', pinterest: '/api/pinterest', npsn: '/api/katalog/npsn', drama: '/api/katalog/drama', wacheck: '/api/wacheck', qris: location.protocol === 'file:' ? '' : location.origin };
 /* ---------- Panel TEST API (admin): buka dengan ?admin di URL ---------- */
 const ENDPOINT_META = { gemini: { fn: 'gemini', env: 'GEMINI_API_KEY', live: true }, rembg: { fn: 'rembg', env: 'REMOVEBG_API_KEY' }, proxy: { fn: 'proxy', env: null } };
 async function testEndpoints(box) {
@@ -1393,7 +1393,7 @@ function serviceTool(c) {
           const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); const d = await r.json();
           if (!r.ok || d.status === 'error') throw new Error(d.message || 'Gagal');
           st.style.color = '#1f8a4c'; st.textContent = 'Selesai' + (d.title ? ': ' + d.title : ''); log(label, 'Selesai', /^https?:\/\//.test(d.download_url || '') ? d.download_url : '');
-        } catch (e) { st.style.color = '#d93a3a'; st.textContent = 'Gagal memproses. Periksa endpoint dan CORS.'; log(label, 'Gagal'); }
+        } catch (e) { st.style.color = '#d93a3a'; st.textContent = e && e.message ? e.message : 'Gagal memproses. Periksa endpoint dan CORS.'; log(label, 'Gagal'); }
       });
       render();
     }
