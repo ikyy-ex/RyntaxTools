@@ -1974,7 +1974,7 @@ function searchTool(c) {
         $('#sr-out').innerHTML = items.length ? items.map((it, i) => '<div class="stat" style="padding:.5rem">' + (/^https?:\/\//.test(it.thumb || '') ? '<img src="' + esc(it.thumb) + '" alt="" loading="lazy" referrerpolicy="no-referrer" style="width:100%;aspect-ratio:4/3;object-fit:cover;border:2px solid #111">' : '<div style="aspect-ratio:4/3;background:' + COLS[i % 5] + ';border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:2rem;color:#111">' + c.emoji + '</div>') + '<b class="block text-sm mt-2 leading-tight">' + esc(it.title || '-') + '</b>' + (it.desc ? '<span class="muted text-xs block">' + esc(it.desc) + '</span>' : '') + (it.ing ? '<details class="text-xs mt-1"><summary class="font-bold cursor-pointer">Bahan &amp; langkah</summary><b>Bahan:</b> ' + esc(it.ing.join(', ')) + '<ol class="list-decimal pl-4 mt-1">' + it.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></details>' : '') + (c.player ? '<button type="button" class="btn mt-2 mr-1" data-play="' + i + '" style="padding:.2rem .6rem">▶ Putar</button>' : '') + (/^https?:\/\//.test(it.url || '') ? '<a class="btn mt-2 inline-block" style="padding:.2rem .6rem" href="' + esc(it.url) + '" target="_blank" rel="noopener noreferrer">Buka</a>' : '') + '</div>').join('') : '';
       }
       function play(it) {
-        const pl = $('#sr-pl'); pl.innerHTML = ''; const src = c.embed && c.embed(it);
+        const pl = $('#sr-pl'); if (c.musicPlayer) { c.musicPlayer(pl, it, last); return; } pl.innerHTML = ''; const src = c.embed && c.embed(it);
         if (/^https:\/\//.test(it.audio || '')) { const a = document.createElement('audio'); a.controls = true; a.autoplay = true; a.src = it.audio; a.style.width = '100%'; pl.appendChild(a); }
         else if (src) { const f = document.createElement('iframe'); f.src = src; f.title = 'Pemutar'; f.allow = 'autoplay; encrypted-media; fullscreen'; f.setAttribute('allowfullscreen', ''); f.referrerPolicy = 'strict-origin-when-cross-origin'; f.style.cssText = 'width:100%;height:' + (c.id === 'ryntax-tube' ? '260px' : '166px') + ';border:2.5px solid #111'; pl.appendChild(f); }
         else Util.toast('Item ini tidak punya sumber pemutar');
@@ -1986,7 +1986,7 @@ function searchTool(c) {
         if (q) { hist = [q].concat(hist.filter(h => h !== q)).slice(0, 8); store.set(HK, hist); drawHist(); }
         if (ep) {
           setSt(st, 'Mencari...');
-          try { const r = await fetch(ep + (ep.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(q)); if (!r.ok) throw 0; const d = await r.json(), items = Array.isArray(d) ? d : (d.results || []); cards(items); setSt(st, items.length + ' hasil.', '#1f8a4c'); }
+          try { const r = await fetch(ep + (ep.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(q)); if (!r.ok) throw 0; const d = await r.json(); let items = Array.isArray(d) ? d : (d.results || []); if (c.prep) items = c.prep(items); cards(items); setSt(st, items.length ? items.length + ' hasil.' : (c.prep ? 'Tidak ada lagu dengan sumber pemutaran valid. Coba kata kunci lain.' : '0 hasil.'), items.length ? '#1f8a4c' : '#b86b00'); }
           catch (e) { cards([]); setSt(st, 'Gagal mengambil data. Periksa endpoint dan CORS.', '#d93a3a'); }
         } else if (c.local) { const items = c.local.filter(i => (i.title + ' ' + i.desc).toLowerCase().includes(q.toLowerCase())); cards(items); setSt(st, items.length + ' hasil (data lokal contoh)' + (c.key ? '. Isi ENDPOINTS.' + c.key + ' untuk data asli.' : ''), '#b86b00'); }
         else { cards([]); setSt(st, 'Endpoint belum diatur (mode placeholder). Isi ENDPOINTS.' + c.key + ' di kode.', '#b86b00'); }
@@ -2169,8 +2169,67 @@ registerTool({
   }
 });
 
+/* ---------- Ryntax Music: pemutar lagu penuh (SoundCloud Widget API resmi) ---------- */
+const MP = { api: null };
+function mpLoadApi() { return MP.api || (MP.api = new Promise((ok, no) => { if (window.SC && SC.Widget) return ok(); const sc = document.createElement('script'); sc.src = 'https://w.soundcloud.com/player/api.js'; sc.onload = ok; sc.onerror = () => { MP.api = null; no(new Error('api')); }; document.head.appendChild(sc); })); }
+const mpFmt = ms => { ms = Math.max(0, Math.floor((ms || 0) / 1000)); const h = Math.floor(ms / 3600), m = Math.floor(ms % 3600 / 60), r = ms % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(r).padStart(2, '0'); };
+const mpPrep = items => items.filter(it => /^https:\/\/soundcloud\.com\//.test(it.url || '') && it.playable !== false).map(it => { const a = it.artist || it.desc || ''; return Object.assign({}, it, { artist: a, desc: a + (it.duration ? ' · ' + mpFmt(it.duration) : '') }); });
+function ryntaxMusicPlayer(box, item, queue) {
+  let qi = queue.indexOf(item); if (qi < 0) { queue = [item]; qi = 0; }
+  if (box._mp) { box._mp.go(queue, qi); return; }
+  if (!document.getElementById('mp-css')) { const cs = document.createElement('style'); cs.id = 'mp-css'; cs.textContent = '.mp{border:2.5px solid #111;background:#fff;color:#111;box-shadow:4px 4px 0 #111;padding:.75rem;display:grid;gap:.65rem}.mp-top{display:flex;gap:.75rem;align-items:center}.mp-cv{width:80px;height:80px;flex:none;border:2.5px solid #111;background:#FFE14D;display:flex;align-items:center;justify-content:center;font-size:2rem;overflow:hidden}.mp-cv img{width:100%;height:100%;object-fit:cover}.mp-meta{min-width:0;display:grid}.mp-meta>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mp-n{font-size:.75rem;font-weight:700}.mp-bar,.mp-vol{display:flex;gap:.5rem;align-items:center;font:700 .75rem monospace}.mp-bar input,.mp-vol input{flex:1;min-width:0;accent-color:#111}.mp-ctl{display:flex;justify-content:center;gap:.5rem}.mp-ctl button{min-width:46px;height:46px;border:2.5px solid #111;background:#fff;color:#111;font-size:1.1rem;box-shadow:2px 2px 0 #111;cursor:pointer}.mp-ctl button[aria-pressed=true]{background:#FF8AD1}.mp-ctl .mp-pp{background:#FFE14D;min-width:60px}.mp-fr{width:100%;height:166px;border:2.5px solid #111}.mp small{font-size:.7rem}'; document.head.appendChild(cs); }
+  const S = { q: queue, i: qi, total: 0, cur: 0, drag: false, shuf: false, rep: 0, play: false, vol: 80, w: null };
+  box.innerHTML = '<div class="mp"><div class="mp-top"><div class="mp-cv">🎵</div><div class="mp-meta"><b class="mp-t"></b><span class="mp-a"></span><span class="mp-n" aria-live="polite"></span></div></div><div class="mp-bar"><span class="mp-cu">0:00</span><input class="mp-sk" type="range" min="0" max="1000" value="0" aria-label="Posisi lagu"><span class="mp-du">0:00</span></div><div class="mp-ctl"><button type="button" data-a="shuf" aria-pressed="false" aria-label="Acak">🔀</button><button type="button" data-a="prev" aria-label="Sebelumnya">⏮</button><button type="button" data-a="pp" class="mp-pp" aria-label="Putar atau jeda">▶</button><button type="button" data-a="next" aria-label="Berikutnya">⏭</button><button type="button" data-a="rep" aria-pressed="false" aria-label="Ulangi">🔁</button></div><label class="mp-vol">🔊<input class="mp-v" type="range" min="0" max="100" value="80" aria-label="Volume"></label><iframe class="mp-fr" title="Pemutar SoundCloud" allow="autoplay"></iframe><small>Sumber audio: SoundCloud (pemutar resmi). Lagu diputar sesuai izin pemilik hak cipta.</small></div>';
+  const $ = x => box.querySelector(x), note = (t, col) => { const n = $('.mp-n'); n.textContent = t; n.style.color = col || 'inherit'; };
+  const cur = () => S.q[S.i], url = it => 'https://w.soundcloud.com/player/?url=' + encodeURIComponent(it.url) + '&auto_play=true&visual=false&show_comments=false&hide_related=true';
+  function setPlay(v) { S.play = v; $('.mp-pp').textContent = v ? '⏸' : '▶'; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = v ? 'playing' : 'paused'; }
+  function paint() {
+    const it = cur(); $('.mp-t').textContent = it.title || '-'; $('.mp-a').textContent = it.artist || '';
+    $('.mp-cv').innerHTML = /^https?:\/\//.test(it.thumb || '') ? '<img src="' + esc(it.thumb) + '" alt="" referrerpolicy="no-referrer">' : '🎵';
+    S.total = it.duration || 0; S.cur = 0; $('.mp-sk').value = 0; $('.mp-cu').textContent = '0:00'; $('.mp-du').textContent = mpFmt(S.total); note('Memuat...');
+    if ('mediaSession' in navigator && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: it.title || '', artist: it.artist || '', artwork: /^https?:\/\//.test(it.thumb || '') ? [{ src: it.thumb }] : [] });
+  }
+  function fail(msg) { setPlay(false); note(msg, '#d93a3a'); Util.toast(msg); }
+  function meta() {
+    const w = S.w; w.getCurrentSound(snd => {
+      if (!snd || snd.policy === 'BLOCK') { fail('Lagu ini tidak tersedia atau tidak bisa diputar di sini.'); return; }
+      w.getDuration(d => {
+        const full = snd.full_duration || 0, snip = snd.policy === 'SNIP' || (full && d && d < full - 1500);
+        S.total = d || snd.duration || S.total; $('.mp-du').textContent = mpFmt(S.total);
+        if (snd.title && !cur().title) $('.mp-t').textContent = snd.title;
+        if (snip) note('Hanya preview (' + mpFmt(S.total) + '). Versi penuh' + (full ? ' (' + mpFmt(full) + ')' : '') + ' tidak tersedia untuk lagu ini.', '#b86b00'); else note('Lagu penuh · ' + mpFmt(S.total), '#1f8a4c');
+      });
+    });
+  }
+  function nextIdx(auto) { const n = S.q.length; if (S.shuf && n > 1) { let j; do j = Math.floor(Math.random() * n); while (j === S.i); return j; } if (S.i + 1 < n) return S.i + 1; return (S.rep === 1 || !auto) ? 0 : -1; }
+  function bind() {
+    const w = S.w, E = SC.Widget.Events; [E.PLAY, E.PAUSE, E.FINISH, E.PLAY_PROGRESS, E.ERROR].forEach(e => w.unbind(e));
+    w.bind(E.PLAY, () => setPlay(true)); w.bind(E.PAUSE, () => setPlay(false)); w.bind(E.ERROR, () => fail('Lagu tidak dapat diputar. Coba lagu lain.'));
+    w.bind(E.PLAY_PROGRESS, d => { S.cur = d.currentPosition; if (!S.drag) { $('.mp-cu').textContent = mpFmt(S.cur); $('.mp-sk').value = S.total ? Math.min(1000, S.cur / S.total * 1000) : 0; } });
+    w.bind(E.FINISH, () => { if (S.rep === 2) { w.seekTo(0); w.play(); return; } const j = nextIdx(true); if (j < 0) { setPlay(false); $('.mp-sk').value = 0; $('.mp-cu').textContent = '0:00'; note('Selesai.'); } else go(S.q, j); });
+  }
+  function hint() { setTimeout(() => { if (!S.play && $('.mp-n').textContent === 'Memuat...') note('Tekan ▶ untuk memulai.', '#b86b00'); }, 3500); }
+  function go(q, i) {
+    S.q = q; S.i = i; paint(); if (!S.w) return;
+    S.w.load(cur().url, { auto_play: true, visual: false, show_comments: false, hide_related: true, callback: () => { bind(); S.w.setVolume(S.vol); meta(); hint(); } });
+  }
+  const sk = $('.mp-sk');
+  sk.addEventListener('input', () => { S.drag = true; $('.mp-cu').textContent = mpFmt(sk.value / 1000 * S.total); });
+  sk.addEventListener('change', () => { if (S.w && S.total) S.w.seekTo(Math.round(sk.value / 1000 * S.total)); S.drag = false; });
+  $('.mp-v').addEventListener('input', e => { S.vol = +e.target.value; if (S.w) S.w.setVolume(S.vol); });
+  const act = { pp() { if (S.w) S.play ? S.w.pause() : S.w.play(); }, next() { go(S.q, nextIdx(false)); }, prev() { if (S.cur > 3000 && S.w) S.w.seekTo(0); else go(S.q, S.i > 0 ? S.i - 1 : (S.rep === 1 ? S.q.length - 1 : 0)); },
+    shuf(b) { S.shuf = !S.shuf; b.setAttribute('aria-pressed', S.shuf); }, rep(b) { S.rep = (S.rep + 1) % 3; b.textContent = S.rep === 2 ? '🔂' : '🔁'; b.setAttribute('aria-pressed', S.rep > 0); note(['Ulangi: mati', 'Ulangi semua lagu', 'Ulangi satu lagu'][S.rep]); } };
+  box.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => act[b.dataset.a](b)));
+  if ('mediaSession' in navigator) [['play', act.pp], ['pause', act.pp], ['nexttrack', act.next], ['previoustrack', act.prev]].forEach(([k, f]) => { try { navigator.mediaSession.setActionHandler(k, f); } catch (e) { /* abaikan */ } });
+  box._mp = { go };
+  paint();
+  mpLoadApi().then(() => {
+    const fr = $('.mp-fr'); fr.src = url(cur()); S.w = SC.Widget(fr);
+    S.w.bind(SC.Widget.Events.READY, () => { bind(); S.w.setVolume(S.vol); meta(); hint(); });
+  }).catch(() => fail('Pemutar SoundCloud gagal dimuat. Periksa koneksi internet.'));
+}
 /* ---------- Music & Tube (pabrik pencarian) ---------- */
-searchTool({ id: 'ryntax-music', key: 'music', name: 'Ryntax Music', badge: 'PREMIUM', description: 'Cari lagu SoundCloud dan putar preview.', keywords: 'musik lagu soundcloud putar cari audio player', ph: 'Cari lagu atau tempel link SoundCloud', emoji: '🎵', player: true, quick: ['Populer', 'Santai'], embed: it => /^https:\/\/soundcloud\.com\//.test(it.url || '') ? 'https://w.soundcloud.com/player/?auto_play=true&url=' + encodeURIComponent(it.url) : null, icon: '<circle cx="8" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M11 18V6l10-2v12"/>' });
+searchTool({ id: 'ryntax-music', key: 'music', name: 'Ryntax Music', badge: 'PREMIUM', description: 'Cari lagu SoundCloud dan putar lagu penuh dengan pemutar resmi.', keywords: 'musik lagu soundcloud putar cari audio player', ph: 'Cari lagu atau tempel link SoundCloud', emoji: '🎵', player: true, musicPlayer: ryntaxMusicPlayer, prep: mpPrep, quick: ['Populer', 'Santai'], embed: it => /^https:\/\/soundcloud\.com\//.test(it.url || '') ? 'https://w.soundcloud.com/player/?auto_play=true&url=' + encodeURIComponent(it.url) : null, icon: '<circle cx="8" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M11 18V6l10-2v12"/>' });
 searchTool({ id: 'ryntax-tube', key: 'tube', name: 'Ryntax Tube', description: 'Nonton • Cari • Live. Embed player YouTube.', keywords: 'tube video youtube nonton cari live trending embed player', ph: 'Cari video atau tempel link YouTube', emoji: '▶️', player: true, quick: ['Trending', 'Live'], embed: it => { const m = (it.url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|live\/))([\w-]{11})/); return m ? 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1' : null; }, icon: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/>' });
 
 /* ---------- Anime Quote ---------- */
