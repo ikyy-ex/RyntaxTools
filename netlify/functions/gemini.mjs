@@ -1,4 +1,3 @@
-
 const response = (statusCode, body) => ({
   statusCode,
   headers: {
