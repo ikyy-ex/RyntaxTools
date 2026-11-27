@@ -1,3 +1,4 @@
+
 const response = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -10,16 +11,11 @@ const response = (statusCode, body) => ({
   body: JSON.stringify(body)
 });
 
-function getModelName() {
-  // Normalize case, whitespace, and an optional "models/" prefix.
-  // This prevents an uppercase Netlify environment value from reaching Gemini.
-  const raw = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
-  const model = raw.replace(/^models\//i, "").toLowerCase();
-
-  if (!/^[a-z0-9._-]+$/.test(model)) {
-    throw new Error("GEMINI_MODEL tidak valid. Gunakan nama model saja, misalnya gemini-2.5-flash.");
-  }
-  return model;
+function normalizeModel(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^models\//i, "")
+    .toLowerCase();
 }
 
 function toGeminiContents(messages) {
@@ -28,48 +24,164 @@ function toGeminiContents(messages) {
   }
 
   const contents = [];
+
   for (const item of messages) {
-    if (!item || typeof item.content !== "string" || !item.content.trim()) continue;
-    const role = item.role === "assistant" || item.role === "model" ? "model" : "user";
+    if (!item || typeof item.content !== "string" || !item.content.trim()) {
+      continue;
+    }
+
+    const role =
+      item.role === "assistant" || item.role === "model"
+        ? "model"
+        : "user";
+
     const text = item.content.trim();
     const last = contents.at(-1);
-    if (last && last.role === role) last.parts[0].text += "\n" + text;
-    else contents.push({ role, parts: [{ text }] });
+
+    if (last && last.role === role) {
+      last.parts[0].text += "\n" + text;
+    } else {
+      contents.push({
+        role,
+        parts: [{ text }]
+      });
+    }
   }
 
-  while (contents.length && contents[0].role === "model") contents.shift();
-  if (!contents.length) throw new Error("Tidak ada pesan yang dapat diproses.");
+  while (contents.length && contents[0].role === "model") {
+    contents.shift();
+  }
+
+  if (!contents.length) {
+    throw new Error("Tidak ada pesan yang dapat diproses.");
+  }
+
   return contents;
+}
+
+async function getAvailableModels(apiKey, signal) {
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000";
+
+  const result = await fetch(url, {
+    method: "GET",
+    headers: {
+      "x-goog-api-key": apiKey
+    },
+    signal
+  });
+
+  const data = await result.json().catch(() => ({}));
+
+  if (!result.ok) {
+    throw new Error(
+      data?.error?.message ||
+      `Gagal memeriksa model Gemini: HTTP ${result.status}`
+    );
+  }
+
+  return Array.isArray(data.models) ? data.models : [];
+}
+
+function selectModel(models) {
+  const available = models
+    .filter(model =>
+      Array.isArray(model.supportedGenerationMethods) &&
+      model.supportedGenerationMethods.includes("generateContent")
+    )
+    .map(model => normalizeModel(model.name))
+    .filter(Boolean);
+
+  if (!available.length) {
+    throw new Error(
+      "Tidak ditemukan model Gemini yang mendukung generateContent untuk API Key ini."
+    );
+  }
+
+  const configured = normalizeModel(process.env.GEMINI_MODEL);
+
+  // Prioritaskan model yang diatur di Netlify.
+  if (configured && available.includes(configured)) {
+    return configured;
+  }
+
+  // Jika model konfigurasi tidak tersedia,
+  // cari model Flash yang benar-benar tersedia.
+  const flash = available.find(name =>
+    /flash/i.test(name)
+  );
+
+  if (flash) {
+    return flash;
+  }
+
+  // Pilihan terakhir: gunakan model pertama yang tersedia.
+  return available[0];
 }
 
 export const handler = async (event) => {
   const headers = response(204, {}).headers;
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers, body: "" };
-  if (event.httpMethod !== "POST") return response(405, { error: "Gunakan metode POST." });
+
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers,
+      body: ""
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return response(405, {
+      error: "Gunakan metode POST."
+    });
+  }
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return response(503, { error: "GEMINI_API_KEY belum diatur pada Environment Variables Netlify." });
+
+  if (!apiKey) {
+    return response(503, {
+      error: "GEMINI_API_KEY belum diatur di Netlify."
+    });
+  }
 
   let payload;
+
   try {
     payload = JSON.parse(event.body || "{}");
   } catch {
-    return response(400, { error: "Body request harus berupa JSON yang valid." });
+    return response(400, {
+      error: "Body request harus berupa JSON yang valid."
+    });
   }
 
-  let contents, model;
+  let contents;
+
   try {
     contents = toGeminiContents(payload.messages);
-    model = getModelName();
   } catch (error) {
-    return response(400, { error: error.message });
+    return response(400, {
+      error: error.message
+    });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25000);
+
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, 25000);
 
   try {
+    // Periksa model yang tersedia untuk API Key.
+    const models = await getAvailableModels(
+      apiKey,
+      controller.signal
+    );
+
+    const model = selectModel(models);
+
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
     const upstream = await fetch(url, {
       method: "POST",
       headers: {
@@ -78,40 +190,69 @@ export const handler = async (event) => {
       },
       body: JSON.stringify({
         contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048
+        }
       }),
       signal: controller.signal
     });
 
     const data = await upstream.json().catch(() => ({}));
+
     if (!upstream.ok) {
-      const detail = data?.error?.message || `Gemini API HTTP ${upstream.status}`;
-      let error = detail;
-      if (upstream.status === 400 && /model|format/i.test(detail)) {
-        error = `Gemini menolak nama model "${model}". Periksa model yang tersedia untuk API key ini.`;
-      } else if ([401, 403].includes(upstream.status)) {
-        error = "API key tidak valid, tidak memiliki izin, atau Gemini API belum diaktifkan.";
-      } else if (upstream.status === 404) {
-        error = `Model "${model}" tidak ditemukan atau tidak tersedia untuk API key ini.`;
-      } else if (upstream.status === 429) {
-        error = "Kuota atau batas penggunaan Gemini tercapai. Coba lagi nanti.";
+      const detail =
+        data?.error?.message ||
+        `Gemini API HTTP ${upstream.status}`;
+
+      if ([401, 403].includes(upstream.status)) {
+        return response(upstream.status, {
+          error: "API Key tidak valid, tidak memiliki izin, atau Gemini API belum diaktifkan."
+        });
       }
-      return response(upstream.status >= 500 ? 502 : upstream.status, { error });
+
+      if (upstream.status === 429) {
+        return response(429, {
+          error: "Kuota Gemini tercapai. Coba lagi nanti."
+        });
+      }
+
+      return response(
+        upstream.status >= 500 ? 502 : upstream.status,
+        {
+          error: `Gemini menolak model ${model}: ${detail}`
+        }
+      );
     }
 
-    const reply = (data?.candidates?.[0]?.content?.parts || [])
+    const reply = (
+      data?.candidates?.[0]?.content?.parts || []
+    )
       .map(part => part.text || "")
       .join("")
       .trim();
 
-    if (!reply) return response(502, { error: "Gemini tidak mengembalikan teks jawaban." });
-    return response(200, { status: "ok", reply });
+    if (!reply) {
+      return response(502, {
+        error: "Gemini tidak mengembalikan teks jawaban."
+      });
+    }
+
+    return response(200, {
+      status: "ok",
+      reply,
+      model
+    });
+
   } catch (error) {
     return response(502, {
-      error: error?.name === "AbortError"
-        ? "Permintaan ke Gemini timeout. Coba lagi."
-        : "Backend tidak dapat menghubungi layanan Gemini."
+      error:
+        error?.name === "AbortError"
+          ? "Permintaan Gemini timeout. Coba lagi."
+          : error?.message ||
+            "Backend tidak dapat menghubungi Gemini."
     });
+
   } finally {
     clearTimeout(timer);
   }
