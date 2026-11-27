@@ -11,12 +11,13 @@ const response = (statusCode, body) => ({
 });
 
 function getModelName() {
-  // Accept either "gemini-2.5-flash" or "models/gemini-2.5-flash".
-  // The REST URL below adds the "models/" path segment itself.
+  // Normalize case, whitespace, and an optional "models/" prefix.
+  // This prevents an uppercase Netlify environment value from reaching Gemini.
   const raw = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
-  const model = raw.replace(/^models\//i, "");
-  if (!/^[a-zA-Z0-9._-]+$/.test(model)) {
-    throw new Error("GEMINI_MODEL tidak valid. Isi dengan nama model saja, contoh: gemini-2.5-flash (tanpa URL atau path models/).");
+  const model = raw.replace(/^models\//i, "").toLowerCase();
+
+  if (!/^[a-z0-9._-]+$/.test(model)) {
+    throw new Error("GEMINI_MODEL tidak valid. Gunakan nama model saja, misalnya gemini-2.5-flash.");
   }
   return model;
 }
@@ -42,7 +43,8 @@ function toGeminiContents(messages) {
 }
 
 export const handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: response(204, {}).headers, body: "" };
+  const headers = response(204, {}).headers;
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers, body: "" };
   if (event.httpMethod !== "POST") return response(405, { error: "Gunakan metode POST." });
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -86,11 +88,11 @@ export const handler = async (event) => {
       const detail = data?.error?.message || `Gemini API HTTP ${upstream.status}`;
       let error = detail;
       if (upstream.status === 400 && /model|format/i.test(detail)) {
-        error = `Nama model "${model}" ditolak Gemini. Isi GEMINI_MODEL dengan nama model yang valid, misalnya gemini-2.5-flash, tanpa awalan "models/" atau URL.`;
+        error = `Gemini menolak nama model "${model}". Periksa model yang tersedia untuk API key ini.`;
       } else if ([401, 403].includes(upstream.status)) {
         error = "API key tidak valid, tidak memiliki izin, atau Gemini API belum diaktifkan.";
       } else if (upstream.status === 404) {
-        error = `Model "${model}" tidak ditemukan atau tidak tersedia untuk API key ini. Periksa nama model di Google AI Studio.`;
+        error = `Model "${model}" tidak ditemukan atau tidak tersedia untuk API key ini.`;
       } else if (upstream.status === 429) {
         error = "Kuota atau batas penggunaan Gemini tercapai. Coba lagi nanti.";
       }
