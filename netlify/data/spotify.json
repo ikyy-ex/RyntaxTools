@@ -1,0 +1,3 @@
+const response = await fetch("https://api.nexadev.my.id/api/spotify?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F5vQSU3pxA9atqN6zMrcTU7%3Fsi%3DjEdF4DG3R2ShotykgqJE4A");
+const data = await response.json();
+console.log(data);
