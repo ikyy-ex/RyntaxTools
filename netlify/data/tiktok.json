@@ -1,3 +1,0 @@
-const response = await fetch("https://api.nexadev.my.id/api/aio?url=https%3A%2F%2Fvt.tiktok.com%2FZS2x9a9d");
-const data = await response.json();
-console.log(data);
