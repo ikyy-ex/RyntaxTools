@@ -3018,25 +3018,83 @@ genTool({
   }
 });
 
+/* ---------- Nexa AI (api.nexadev.my.id/ai/gpt4) ----------
+   Endpoint : GET https://api.nexadev.my.id/ai/gpt4?q=PERTANYAAN
+   Respons  : { "author":"NexaDev", "status":true, "data":{ "message":"..." } } */
+window.NexaAI = (function () {
+  const BASE = 'https://api.nexadev.my.id/ai/gpt4', MAX_Q = 3000, TIMEOUT = 45000;
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function buildPrompt(text, hist) {
+    text = String(text || '').trim();
+    const past = (hist || []).filter(m => m && (m.role === 'user' || m.role === 'assistant') && m.content).slice(-6);
+    const ctx = past.map(m => (m.role === 'user' ? 'User: ' : 'AI: ') + String(m.content).replace(/\s+/g, ' ').slice(0, 300)).join('\n');
+    let q = ctx ? 'Konteks percakapan sebelumnya:\n' + ctx + '\n\nPertanyaan baru (jawab dengan bahasa yang sama seperti pengguna): ' + text : text;
+    if (q.length > MAX_Q) q = text;
+    if (q.length > MAX_Q) q = text.slice(0, MAX_Q);
+    return q;
+  }
+  async function getJson(url) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), TIMEOUT);
+    try {
+      const r = await fetch(url, { signal: ctl.signal, headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Server Nexa AI membalas HTTP ' + r.status + '.');
+      return await r.json();
+    } finally { clearTimeout(t); }
+  }
+  async function ask(text, hist) {
+    const api = BASE + '?q=' + encodeURIComponent(buildPrompt(text, hist));
+    let d;
+    try { d = await getJson(api); }
+    catch (e1) {
+      if (e1 && e1.name === 'AbortError') throw new Error('Waktu tunggu habis, silakan coba lagi.');
+      let viaProxy = null;
+      try { if (typeof ENDPOINTS !== 'undefined' && ENDPOINTS.proxy && location.protocol !== 'file:') viaProxy = await getJson(ENDPOINTS.proxy + encodeURIComponent(api)); } catch (e2) { viaProxy = null; }
+      if (!viaProxy) throw new Error(e1 instanceof TypeError ? 'Tidak dapat terhubung ke Nexa AI. Periksa koneksi internet Anda.' : (e1.message || 'Gagal menghubungi Nexa AI.'));
+      d = viaProxy;
+    }
+    const msg = d && d.data && d.data.message;
+    if (!d || d.status === false || typeof msg !== 'string' || !msg.trim()) throw new Error('Respons Nexa AI tidak valid.');
+    return msg.trim();
+  }
+  /* Teks aman -> HTML ringan: ```blok kode```, `kode`, **tebal** */
+  function format(text) {
+    const parts = esc(text).split(/```[a-zA-Z0-9_+-]*\n?([\s\S]*?)```/);
+    return parts.map((p, i) => {
+      if (i % 2) return '<pre class="nx-code"><code>' + p.replace(/\n$/, '') + '</code></pre>';
+      if (i > 0) p = p.replace(/^\n/, '');
+      return p.replace(/`([^`\n]+)`/g, '<code class="nx-ic">$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+    }).join('');
+  }
+  const st = document.createElement('style');
+  st.textContent = '.nx-code{display:block;max-width:100%;overflow-x:auto;margin:8px 0;padding:10px 12px;border-radius:10px;background:#0f172a;color:#e2e8f0;font:.78rem/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre;-webkit-overflow-scrolling:touch}.nx-ic{padding:1px 5px;border-radius:5px;background:rgba(125,125,125,.22);font:.86em ui-monospace,Menlo,Consolas,monospace}';
+  document.head.appendChild(st);
+  return { ask: ask, format: format, esc: esc };
+})();
+
 /* ---------- Ryntax AI ---------- */
 registerTool({
   id: 'ryntax-ai', name: 'Ryntax AI', category: 'AI', badge: 'PREMIUM',
-  description: 'Chat dan template siap pakai. Gemini AI atau hubungkan API.', keywords: 'ai chat asisten gpt caption ringkas ide konten ryntax',
+  description: 'Chat dan template siap pakai. Ditenagai Nexa AI (GPT-4), atau pilih Gemini / hubungkan API.', keywords: 'ai chat asisten gpt caption ringkas ide konten ryntax',
   icon: '<rect x="4" y="6" width="16" height="12" rx="3"/><path d="M12 6V3M9 12h.01M15 12h.01M9 16h6"/>',
   mount(root) {
     const TPL = [['Caption', 'Buatkan 3 caption singkat untuk: '], ['Ringkas', 'Ringkas teks berikut: '], ['Ide konten', 'Beri 5 ide konten tentang: '], ['Perbaiki kalimat', 'Perbaiki tata bahasa: '], ['Terjemahkan', 'Terjemahkan ke bahasa Inggris: ']];
-    root.innerHTML = '<div class="grid sm:grid-cols-4 gap-3">' + ctl({ id: 'mode', label: 'Mode', opts: [['gemini', 'Gemini AI'], ['api', 'Hubungkan API']] }, 'ai-') +
+    root.innerHTML = '<div class="grid sm:grid-cols-4 gap-3">' + ctl({ id: 'mode', label: 'Mode', opts: [['nexa', 'Nexa AI (GPT-4)'], ['gemini', 'Gemini AI'], ['api', 'Hubungkan API']] }, 'ai-') +
       '<div class="sm:col-span-3 api-box hidden"><div class="grid sm:grid-cols-3 gap-3">' + ctl({ id: 'url', label: 'Endpoint (kompatibel OpenAI)', attr: 'value="https://api.openai.com/v1/chat/completions"' }, 'ai-') + ctl({ id: 'key', label: 'API key', attr: 'type="password" autocomplete="off"' }, 'ai-') + ctl({ id: 'model', label: 'Model', attr: 'value="gpt-4o-mini"' }, 'ai-') + '</div><p class="text-xs muted mt-2">Kunci hanya disimpan di memori halaman ini. Untuk situs publik, sebaiknya arahkan endpoint ke backend/proxy milik Anda agar kunci tidak terlihat pengunjung.</p></div></div>' +
       '<div class="flex flex-wrap gap-2 mt-4" id="ai-tpl">' + TPL.map((t, i) => '<button type="button" class="chip" data-i="' + i + '">' + t[0] + '</button>').join('') + '</div>' +
       '<div id="ai-log" class="stat mt-4 grid gap-2 content-start" style="min-height:13rem;max-height:22rem;overflow:auto" aria-live="polite"></div>' +
       '<textarea id="ai-in" class="field mt-3" rows="3" placeholder="Tulis pesan atau pilih template di atas..."></textarea><div class="flex gap-2 mt-3"><button id="ai-send" class="btn btn-primary" type="button">Kirim</button><button id="ai-clear" class="btn" type="button">Hapus chat</button></div>';
     const $ = s => Util.$(s, root); const hist = [];
-    const add = (who, text) => { const d = document.createElement('div'); d.className = 'stat'; d.style.background = who === 'user' ? 'var(--accent-soft)' : 'var(--surface)'; const b = document.createElement('b'); b.className = 'text-xs block'; b.textContent = who === 'user' ? 'Anda' : 'Ryntax AI'; const p = document.createElement('div'); p.style.whiteSpace = 'pre-wrap'; p.textContent = text; d.appendChild(b); d.appendChild(p); $('#ai-log').appendChild(d); $('#ai-log').scrollTop = 1e6; };
+    const add = (who, text, rich) => { const d = document.createElement('div'); d.className = 'stat'; d.style.background = who === 'user' ? 'var(--accent-soft)' : 'var(--surface)'; const b = document.createElement('b'); b.className = 'text-xs block'; b.textContent = who === 'user' ? 'Anda' : 'Ryntax AI'; const p = document.createElement('div'); p.style.whiteSpace = 'pre-wrap'; p.style.overflowWrap = 'anywhere'; if (rich) p.innerHTML = window.NexaAI.format(text); else p.textContent = text; d.appendChild(b); d.appendChild(p); $('#ai-log').appendChild(d); $('#ai-log').scrollTop = 1e6; return p; };
     async function send() {
-      const text = $('#ai-in').value.trim(); if (!text) return;
+      if ($('#ai-send').disabled) return; const text = $('#ai-in').value.trim(); if (!text) return;
       add('user', text); $('#ai-in').value = ''; hist.push({ role: 'user', content: text });
       let reply;
-      if ($('#ai-mode').value === 'gemini') {
+      if ($('#ai-mode').value === 'nexa') {
+        const btn = $('#ai-send'); btn.disabled = true; const typing = add('ai', 'Nexa AI sedang mengetik…'); typing.style.opacity = '.7';
+        try { reply = await window.NexaAI.ask(text, hist.slice(0, -1)); }
+        catch (e) { typing.parentNode.remove(); add('ai', 'Nexa AI: ' + e.message); hist.pop(); btn.disabled = false; return; }
+        typing.parentNode.remove(); btn.disabled = false;
+      } else if ($('#ai-mode').value === 'gemini') {
         try { reply = await Gemini.ask(hist); } catch (e) { add('ai', 'Gemini: ' + e.message); hist.pop(); return; }
       } else if ($('#ai-mode').value === 'api') {
         try {
@@ -3044,14 +3102,14 @@ registerTool({
           const d = await r.json(); reply = d.choices[0].message.content;
         } catch (e) { add('ai', 'Gagal menghubungi API. Periksa endpoint, API key, dan izin CORS.'); hist.pop(); return; }
       }
-      hist.push({ role: 'assistant', content: reply }); add('ai', reply);
+      hist.push({ role: 'assistant', content: reply }); add('ai', reply, true);
     }
     $('#ai-mode').addEventListener('input', () => Util.$('.api-box', root).classList.toggle('hidden', $('#ai-mode').value !== 'api'));
     Util.$$('#ai-tpl .chip', root).forEach(b => b.addEventListener('click', () => { $('#ai-in').value = TPL[+b.dataset.i][1]; $('#ai-in').focus(); }));
     $('#ai-send').addEventListener('click', send);
     $('#ai-in').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send(); });
     $('#ai-clear').addEventListener('click', () => { hist.length = 0; $('#ai-log').innerHTML = ''; });
-    add('ai', 'Halo! Pilih template atau tulis pesan. Kirim dengan Ctrl+Enter.');
+    add('ai', 'Halo! Saya Ryntax AI, ditenagai Nexa AI (GPT-4). Pilih template atau tulis pesan. Kirim dengan Ctrl+Enter.');
   }
 });
 
@@ -4307,7 +4365,246 @@ function searchTool(c) {
     }
   });
 }
-searchTool({ id: 'alight-preset', key: 'preset', name: 'Cari Preset Alight Motion', description: 'Cari preset XML/link AM dari link TikTok atau kata kunci.', keywords: 'alight motion preset xml am tiktok link cari editor video', ph: 'Tempel link TikTok atau kata kunci preset', emoji: '🎞️', icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>' });
+/* ---------- Alight Motion: Preset Downloader (API Nexa /api/ampreset) ----------
+   Endpoint : GET https://api.nexadev.my.id/api/ampreset?url=<link TikTok ter-encode>
+   Respons  : { ok, author{username,nickname,avatar}, total, types{xml,5mb}, presets[{type,url,download,thumb,commenter,detail,source,byAuthor,pinned}],
+                video{id,url,playUrl,cover,description,views,likes,comments}, scanned{comments,replies} } */
+const AM_NEXA_API = 'https://api.nexadev.my.id/api/ampreset';
+const AM_TOOL = {
+  id: 'alight-preset', name: 'Cari Preset Alight Motion', category: 'Media', badge: 'TERPOPULER',
+  description: 'Ambil link preset XML / 5MB Alight Motion dari link video TikTok.',
+  keywords: 'alight motion preset xml am 5mb tiktok link cari editor video download ampreset nexa',
+  icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>',
+  mount(root) {
+    root.innerHTML =
+      '<style>' +
+      '.amx-grid{display:grid;gap:.75rem;grid-template-columns:1fr}' +
+      '@media(min-width:640px){.amx-grid{grid-template-columns:1fr 1fr}}' +
+      '.amx-badge{display:inline-block;font-weight:800;font-size:.7rem;padding:.15rem .5rem;border:2px solid var(--line,#111);border-radius:999px;background:#ffe14d;color:#111}' +
+      '.amx-badge.xml{background:#9adbff}.amx-badge.mb{background:#a8f0c6}.amx-badge.pin{background:#ff8ad1}' +
+      '.amx-av{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--line,#111);flex:none;background:#ddd}' +
+      '.amx-cover{width:100%;max-height:260px;object-fit:cover;border:2px solid var(--line,#111);border-radius:8px;background:#222}' +
+      '.amx-detail{font-size:.78rem;max-height:3.6em;overflow:hidden;word-break:break-all}' +
+      '.amx-btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;flex:1 1 auto;text-align:center}' +
+      '.amx-sum{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}' +
+      '@media(min-width:640px){.amx-sum{grid-template-columns:repeat(4,1fr)}}' +
+      '.amx-sum .stat{text-align:center;padding:.5rem}.amx-sum b{display:block;font-size:1.25rem}' +
+      '</style>' +
+      '<div class="flex gap-2"><input id="amx-q" class="field" type="url" inputmode="url" placeholder="https://vt.tiktok.com/..." autocomplete="off" aria-label="Link video TikTok">' +
+      '<button id="amx-go" class="btn btn-primary" type="button">Cari</button></div>' +
+      '<div class="flex flex-wrap gap-2 mt-2"><button id="amx-paste" class="chip" type="button">📋 Tempel</button><button id="amx-clear" class="chip" type="button">✖ Bersihkan</button></div>' +
+      '<div id="amx-h" class="flex flex-wrap gap-2 mt-3"></div>' +
+      '<p id="amx-st" class="text-sm mt-3 font-semibold" aria-live="polite"></p>' +
+      '<div id="amx-out" class="mt-3"></div>' +
+      '<p class="muted text-xs mt-3">Preset diambil otomatis dari komentar video TikTok oleh API Nexa. Gunakan sesuai izin pembuat preset.</p>';
+
+    const $ = s => Util.$(s, root), HK = 'alltools-amx-hist';
+    let hist = store.get(HK, []), data = null, filter = 'all', busy = false;
+    const num = n => { n = Number(n); return isFinite(n) ? new Intl.NumberFormat('id-ID', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n) : '-'; };
+    const okUrl = u => /^https?:\/\//i.test(u || '');
+    const img = (u, cls) => okUrl(u) ? '<img class="' + cls + '" src="' + esc(u) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility=\'hidden\'">' : '';
+    const kind = p => String(p.type || '').toLowerCase() === 'xml' ? 'xml' : '5mb';
+
+    function drawHist() {
+      $('#amx-h').innerHTML = hist.map(h => '<button type="button" class="chip" data-h="' + esc(h) + '">' + esc(h.replace(/^https?:\/\//, '').slice(0, 28)) + '</button>').join('');
+      Util.$$('[data-h]', root).forEach(b => b.addEventListener('click', () => { $('#amx-q').value = b.dataset.h; run(); }));
+    }
+
+    function render() {
+      const out = $('#amx-out');
+      if (!data) { out.innerHTML = ''; return; }
+      const v = data.video || {}, a = data.author || {}, sc = data.scanned || {}, ty = data.types || {};
+      const list = Array.isArray(data.presets) ? data.presets : [];
+      const shown = list.filter(p => filter === 'all' || kind(p) === filter);
+      let h = '';
+
+      // Kartu video + pembuat
+      if (v.id || v.cover || a.username) {
+        h += '<div class="stat">' + img(v.cover, 'amx-cover') +
+          '<div class="flex items-center gap-3 mt-3">' + img(a.avatar, 'amx-av') +
+          '<div class="min-w-0"><b class="block break-words">' + esc(a.nickname || a.username || 'Pembuat video') + '</b>' +
+          (a.username ? '<span class="muted text-xs">@' + esc(a.username) + '</span>' : '') + '</div></div>' +
+          (v.description ? '<p class="text-sm mt-2 break-words">' + esc(v.description) + '</p>' : '') +
+          '<p class="muted text-xs mt-2">👁 ' + num(v.views) + ' · ❤️ ' + num(v.likes) + ' · 💬 ' + num(v.comments) + '</p>' +
+          '<div class="flex flex-wrap gap-2 mt-3">' +
+          (okUrl(v.url) ? '<a class="btn amx-btn" href="' + esc(v.url) + '" target="_blank" rel="noopener noreferrer">Buka di TikTok</a>' : '') +
+          (okUrl(v.playUrl) ? '<a class="btn amx-btn" href="' + esc(v.playUrl) + '" target="_blank" rel="noopener noreferrer">Putar video</a>' : '') +
+          '</div></div>';
+      }
+
+      // Ringkasan
+      h += '<div class="amx-sum mt-3">' +
+        '<div class="stat"><b>' + num(data.total != null ? data.total : list.length) + '</b><span class="muted text-xs">Total preset</span></div>' +
+        '<div class="stat"><b>' + num(ty.xml || 0) + '</b><span class="muted text-xs">XML</span></div>' +
+        '<div class="stat"><b>' + num(ty['5mb'] || 0) + '</b><span class="muted text-xs">Link 5MB</span></div>' +
+        '<div class="stat"><b>' + num(sc.comments || 0) + '</b><span class="muted text-xs">Komentar dipindai</span></div></div>';
+
+      // Filter
+      h += '<div class="flex flex-wrap gap-2 mt-3" role="tablist">' + [['all', 'Semua'], ['xml', 'XML'], ['5mb', '5MB']].map(f =>
+        '<button type="button" class="chip" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '" style="' + (filter === f[0] ? 'background:#ffe14d;color:#111' : '') + '">' + f[1] + '</button>').join('') + '</div>';
+
+      // Daftar preset
+      h += '<div class="amx-grid mt-3">' + (shown.length ? shown.map((p, i) => {
+        const k = kind(p), dl = okUrl(p.download) ? p.download : '', link = okUrl(p.url) ? p.url : '';
+        return '<div class="stat"><div class="flex items-center gap-2 flex-wrap">' +
+          '<span class="amx-badge ' + (k === 'xml' ? 'xml' : 'mb') + '">' + (k === 'xml' ? 'XML' : '5MB') + '</span>' +
+          (p.pinned ? '<span class="amx-badge pin">📌 Disematkan</span>' : '') +
+          (p.byAuthor ? '<span class="amx-badge">Pembuat</span>' : '') + '</div>' +
+          '<div class="flex items-center gap-2 mt-2">' + img(p.thumb, 'amx-av') +
+          '<div class="min-w-0"><b class="block text-sm break-words">' + esc(p.commenter || 'Anonim') + '</b>' +
+          '<span class="muted text-xs">' + esc(p.source === 'comment' ? 'Dari komentar' : (p.source || '')) + '</span></div></div>' +
+          (p.detail ? '<p class="muted amx-detail mt-2">' + esc(p.detail) + '</p>' : '') +
+          '<p class="text-xs mt-2 break-all"><a class="underline" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">' + esc(link.replace(/^https?:\/\//, '').slice(0, 60)) + (link.length > 66 ? '…' : '') + '</a></p>' +
+          '<div class="flex flex-wrap gap-2 mt-3">' +
+          (dl ? '<a class="btn btn-primary amx-btn" href="' + esc(dl) + '" target="_blank" rel="noopener noreferrer" download>⬇ Download XML</a>' : '') +
+          (link ? '<a class="btn ' + (dl ? '' : 'btn-primary ') + 'amx-btn" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">' + (k === 'xml' ? 'Buka file' : 'Buka di Alight Motion') + '</a>' : '') +
+          '<button type="button" class="btn amx-btn" data-copy="' + esc(dl || link) + '">Salin link</button>' +
+          '</div></div>';
+      }).join('') : '<p class="muted text-sm">Tidak ada preset untuk filter ini.</p>') + '</div>';
+
+      out.innerHTML = h;
+      Util.$$('[data-f]', root).forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
+      Util.$$('[data-copy]', root).forEach(b => b.addEventListener('click', () => Util.copy(b.dataset.copy)));
+    }
+
+    async function getJson(url) {
+      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function run() {
+      if (busy) return;
+      const q = $('#amx-q').value.trim(), st = $('#amx-st');
+      if (!/^https?:\/\//i.test(q)) { setSt(st, 'Masukkan URL lengkap diawali https://', '#d93a3a'); return; }
+      if (!/tiktok\.com/i.test(q)) { setSt(st, 'URL harus berasal dari tiktok.com (mis. https://vt.tiktok.com/...).', '#d93a3a'); return; }
+      busy = true; $('#amx-go').disabled = true; setSt(st, 'Memindai komentar video... (bisa 10-30 detik)');
+      const api = AM_NEXA_API + '?url=' + encodeURIComponent(q);
+      try {
+        let d;
+        try { d = await getJson(api); }
+        catch (e1) { // cadangan: lewat proxy situs jika browser memblokir CORS
+          if (!ENDPOINTS.proxy) throw e1;
+          d = await getJson(ENDPOINTS.proxy + encodeURIComponent(api));
+        }
+        if (!d || d.ok === false || d.status === 'error') throw new Error((d && (d.message || d.error)) || 'API mengembalikan error');
+        data = d; filter = 'all'; render();
+        hist = [q].concat(hist.filter(h => h !== q)).slice(0, 6); store.set(HK, hist); drawHist();
+        const n = Array.isArray(d.presets) ? d.presets.length : 0;
+        setSt(st, n ? n + ' preset ditemukan.' : 'Tidak ada preset ditemukan di komentar video ini.', n ? '#1f8a4c' : '#b86b00');
+      } catch (e) {
+        data = null; render();
+        setSt(st, 'Gagal mengambil data: ' + (e && e.message ? e.message : 'periksa koneksi / CORS') + '. Coba lagi sebentar.', '#d93a3a');
+      } finally { busy = false; $('#amx-go').disabled = false; }
+    }
+
+    $('#amx-go').addEventListener('click', run);
+    $('#amx-q').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    $('#amx-clear').addEventListener('click', () => { $('#amx-q').value = ''; data = null; render(); setSt($('#amx-st'), ''); });
+    $('#amx-paste').addEventListener('click', async () => {
+      try { const t = await navigator.clipboard.readText(); if (t) { $('#amx-q').value = t.trim(); run(); } else Util.toast('Clipboard kosong'); }
+      catch (e) { Util.toast('Tidak bisa membaca clipboard, tempel manual'); }
+    });
+    drawHist();
+  }
+};
+registerTool(AM_TOOL);
+/* "AM Tools" (tool lama di daftar awal) memakai antarmuka yang sama agar tidak lagi berupa placeholder */
+(function () { try { const t = tools.find(x => x.id === 'am-tools'); if (t) t._tool = AM_TOOL; } catch (e) { /* abaikan */ } })();
+
+/* ---------- Downloader tambahan (API Nexa all-in-one) ----------
+   Endpoint : GET https://api.nexadev.my.id/api/aio?url=<link ter-encode>
+   Ganti endpoint per tool lewat properti `api` di daftar NEXA_DL di bawah bila Nexa punya path khusus. */
+const NEXA_AIO_API = 'https://api.nexadev.my.id/api/aio';
+function nexaDl(c) {
+  registerTool({
+    id: c.id, name: c.name, category: 'Downloader', badge: c.badge, description: c.description, keywords: c.keywords, icon: c.icon,
+    mount(root) {
+      root.innerHTML =
+        '<style>.nxd-btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;flex:1 1 auto;text-align:center}' +
+        '.nxd-cover{width:100%;max-height:260px;object-fit:cover;border:2px solid var(--line,#111);border-radius:8px;background:#222}' +
+        '.nxd-pre{max-height:220px;overflow:auto;font-size:.72rem;white-space:pre-wrap;word-break:break-all}</style>' +
+        '<div class="flex gap-2"><input id="nxd-q" class="field" type="url" inputmode="url" placeholder="' + c.ph + '" autocomplete="off" aria-label="URL ' + esc(c.name) + '">' +
+        '<button id="nxd-go" class="btn btn-primary" type="button">Proses</button></div>' +
+        '<div class="flex flex-wrap gap-2 mt-2"><button id="nxd-paste" class="chip" type="button">📋 Tempel</button><button id="nxd-clear" class="chip" type="button">✖ Bersihkan</button></div>' +
+        '<p id="nxd-st" class="text-sm mt-3 font-semibold" aria-live="polite"></p><div id="nxd-out" class="mt-3"></div>' +
+        '<p class="muted text-xs mt-3">Gunakan hanya untuk konten milik Anda atau yang diizinkan pemiliknya. Hasil disediakan oleh API Nexa.</p>';
+      const $ = s => Util.$(s, root); let busy = false;
+      const okUrl = u => /^https?:\/\//i.test(u || '');
+      const COVER = /cover|thumb|avatar|poster|icon|logo|banner/i, DL = /mp3|mp4|m4a|audio|video|download|dl|hd|sd|nowm|file|media|play|src/i;
+      const pick = (o, keys) => { for (const k of keys) { const v = o && o[k]; if (v != null && v !== '' && typeof v !== 'object') return String(v); if (v && typeof v === 'object' && !Array.isArray(v)) { const n = v.nickname || v.name || v.username; if (n) return String(n); } } return ''; };
+      function collect(o, key, lab, out) {
+        if (o == null) return;
+        if (typeof o === 'string') { if (okUrl(o)) out.push({ key: key, url: o, lab: lab }); return; }
+        if (Array.isArray(o)) { o.forEach(v => collect(v, key, lab, out)); return; }
+        if (typeof o === 'object') {
+          const l = [o.quality, o.resolution, o.format, o.ext, o.extension, o.label, o.type].filter(x => x && typeof x !== 'object').join(' ');
+          Object.keys(o).forEach(k => collect(o[k], k, l || lab, out));
+        }
+      }
+      function render(raw) {
+        const x = raw && (raw.data !== undefined ? raw.data : (raw.result !== undefined ? raw.result : raw));
+        const obj = Array.isArray(x) ? (x[0] || {}) : (x || {});
+        const links = []; collect(x, '', '', links);
+        const seen = new Set(), uniq = links.filter(l => !seen.has(l.url) && seen.add(l.url)).slice(0, 30);
+        const cover = (uniq.find(l => COVER.test(l.key)) || uniq.find(l => /\.(jpe?g|png|webp)(\?|$)/i.test(l.url) && !DL.test(l.key)) || {}).url || '';
+        const dls = uniq.filter(l => l.url !== cover && !COVER.test(l.key));
+        const title = pick(obj, ['title', 'name', 'caption', 'desc', 'description', 'text', 'filename', 'file_name']) || pick(raw || {}, ['title']);
+        const who = pick(obj, ['artist', 'author', 'uploader', 'username', 'user', 'owner']) || pick(raw || {}, ['author']);
+        const meta = [who, pick(obj, ['album']), pick(obj, ['duration']), pick(obj, ['year']), pick(obj, ['size', 'filesize', 'file_size'])].filter(Boolean);
+        let h = '<div class="stat">' +
+          (okUrl(cover) ? '<img class="nxd-cover" src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">' : '') +
+          '<b class="block text-lg break-words mt-2">' + esc(title || 'Hasil siap diunduh') + '</b>' +
+          (meta.length ? '<p class="muted text-sm mt-1 break-words">' + meta.map(esc).join(' · ') + '</p>' : '');
+        if (dls.length) {
+          h += '<div class="flex flex-wrap gap-2 mt-3">' + dls.map(l => {
+            const prim = DL.test(l.key), name = (l.lab || l.key || 'link').toString().replace(/_/g, ' ').toUpperCase();
+            return '<a class="btn ' + (prim ? 'btn-primary ' : '') + 'nxd-btn" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer"' + (prim ? ' download' : '') + '>' + (prim ? '⬇ ' : '↗ ') + esc(name) + '</a>';
+          }).join('') + '</div>' +
+          '<div class="flex flex-wrap gap-2 mt-2">' + dls.filter(l => DL.test(l.key)).slice(0, 1).map(l => '<button type="button" class="btn nxd-btn" data-copy="' + esc(l.url) + '">Salin link unduhan</button>').join('') + '</div>';
+        } else h += '<p class="muted text-sm mt-3">API tidak mengirim tautan unduhan untuk URL ini.</p>';
+        h += '</div><details class="mt-3"><summary class="text-sm font-semibold" style="cursor:pointer">Lihat JSON mentah</summary><pre class="stat nxd-pre mt-2">' + esc(JSON.stringify(raw, null, 2).slice(0, 6000)) + '</pre></details>';
+        $('#nxd-out').innerHTML = h;
+        Util.$$('[data-copy]', root).forEach(b => b.addEventListener('click', () => Util.copy(b.dataset.copy)));
+        return dls.length;
+      }
+      async function getJson(url) { const r = await fetch(url, { headers: { Accept: 'application/json' } }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
+      async function run() {
+        if (busy) return;
+        const q = $('#nxd-q').value.trim(), st = $('#nxd-st');
+        if (!/^https?:\/\//i.test(q)) { setSt(st, 'Masukkan URL lengkap diawali https://', '#d93a3a'); return; }
+        if (!c.re.test(q)) { setSt(st, 'URL harus berasal dari ' + c.site + '.', '#d93a3a'); return; }
+        busy = true; $('#nxd-go').disabled = true; $('#nxd-out').innerHTML = ''; setSt(st, 'Memproses...');
+        const api = (c.api || NEXA_AIO_API) + '?url=' + encodeURIComponent(q);
+        try {
+          let d;
+          try { d = await getJson(api); }
+          catch (e1) { if (!ENDPOINTS.proxy) throw e1; d = await getJson(ENDPOINTS.proxy + encodeURIComponent(api)); }
+          if (!d || d.ok === false || d.status === false || d.status === 'error' || d.success === false) throw new Error((d && (d.message || d.error)) || 'API mengembalikan error');
+          const n = render(d);
+          setSt(st, n ? 'Selesai. ' + n + ' tautan ditemukan.' : 'Selesai, tetapi tidak ada tautan unduhan.', n ? '#1f8a4c' : '#b86b00');
+        } catch (e) { setSt(st, 'Gagal memproses: ' + (e && e.message ? e.message : 'periksa koneksi / CORS') + '. Coba lagi sebentar.', '#d93a3a'); }
+        finally { busy = false; $('#nxd-go').disabled = false; }
+      }
+      $('#nxd-go').addEventListener('click', run);
+      $('#nxd-q').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+      $('#nxd-clear').addEventListener('click', () => { $('#nxd-q').value = ''; $('#nxd-out').innerHTML = ''; setSt($('#nxd-st'), ''); });
+      $('#nxd-paste').addEventListener('click', async () => {
+        try { const t = await navigator.clipboard.readText(); if (t) { $('#nxd-q').value = t.trim(); run(); } else Util.toast('Clipboard kosong'); }
+        catch (e) { Util.toast('Tidak bisa membaca clipboard, tempel manual'); }
+      });
+    }
+  });
+}
+[
+  { id: 'applemusic-dl', name: 'Apple Music Downloader', description: 'Download lagu Apple Music (MP3) + cover HD', keywords: 'apple music lagu mp3 cover hd unduh download itunes', ph: 'https://music.apple.com/...', re: /music\.apple\.com|itunes\.apple\.com/i, site: 'music.apple.com', icon: '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>' },
+  { id: 'fb-video-dl', name: 'Facebook Downloader', description: 'Download video Facebook kualitas HD', keywords: 'facebook fb video hd unduh download reels', ph: 'https://www.facebook.com/... atau https://fb.watch/...', re: /facebook\.com|fb\.watch|fb\.com/i, site: 'facebook.com / fb.watch', icon: '<path d="M14 9h3l-.5 3H14v9h-3v-9H8V9h3V7.5C11 5 12.5 4 14.5 4H17v3h-2c-1 0-1 .5-1 1.5V9z"/>' },
+  { id: 'mediafire-dl', name: 'MediaFire Downloader', description: 'Download file/folder MediaFire', keywords: 'mediafire file folder unduh download', ph: 'https://www.mediafire.com/file/...', re: /mediafire\.com/i, site: 'mediafire.com', icon: '<path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z"/><path d="M12 11v5m0 0-2-2m2 2 2-2"/>' },
+  { id: 'sfile-dl', name: 'Sfile Downloader', description: 'Download file dari sfile.mobi / sfile.co', keywords: 'sfile mobi co file unduh download', ph: 'https://sfile.mobi/... atau https://sfile.co/...', re: /sfile\.(mobi|co)/i, site: 'sfile.mobi / sfile.co', icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' },
+  { id: 'snackvideo-dl', name: 'Snackvideo Downloader', description: 'Download video Snack Video tanpa watermark', keywords: 'snack video snackvideo tanpa watermark unduh download', ph: 'https://www.snackvideo.com/... atau https://sck.io/...', re: /snackvideo\.com|snack\.video|sck\.io/i, site: 'snackvideo.com / sck.io', icon: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M7 6l2 4M13 6l2 4"/>' },
+  { id: 'spotify-dl', name: 'Spotify Downloader', description: 'Download lagu Spotify (MP3)', keywords: 'spotify lagu mp3 musik unduh download', ph: 'https://open.spotify.com/track/...', re: /spotify\.com|spotify\.link/i, site: 'spotify.com', icon: '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>' },
+  { id: 'twitter-x-dl', name: 'Twitter / X Downloader', description: 'Download video & foto dari X (Twitter)', keywords: 'twitter x tweet video foto unduh download', ph: 'https://x.com/user/status/...', re: /twitter\.com|x\.com|t\.co/i, site: 'x.com / twitter.com', icon: '<path d="M4 4l16 16M20 4L4 20"/><path d="M4 4h4l12 16h-4z"/>' }
+].forEach(nexaDl);
 searchTool({ id: 'ryntax-bilibili', key: 'bilibili', name: 'Ryntax Bilibili', description: 'Cari video Bilibili.', keywords: 'bilibili video anime cari tonton', ph: 'Cari video Bilibili', emoji: '📺', icon: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 3l3 4M16 3l-3 4M9 12v2M15 12v2"/>' });
 searchTool({ id: 'ryntax-pinterest', key: 'pinterest', name: 'Ryntax Pinterest', description: 'Cari gambar dan video inspirasi.', keywords: 'pinterest gambar video inspirasi cari foto pin', ph: 'Cari gambar atau video', emoji: '📌', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M10 17l-1 4"/>' });
 searchTool({
@@ -6119,8 +6416,8 @@ const RM = (() => {
   const gkey = s => { s = String(s || '').toLowerCase().trim(); if (!s) return ''; if (/hip|rap/.test(s)) return 'hip-hop'; if (/lo-?fi/.test(s)) return 'lo-fi'; if (/r&b|rnb|soul/.test(s)) return 'r&b'; if (/electro|edm|techno|dubstep|trance/.test(s)) return 'electronic'; if (/klasik|classic/.test(s)) return 'classical'; if (/akustik|acoustic/.test(s)) return 'acoustic'; return AU_GEN[s] ? s : ''; };
   const fmt = sec => { sec = Math.max(0, Math.floor(+sec || 0)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), r = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(r).padStart(2, '0'); };
   const okImg = u => /^https:\/\//.test(u || '');
-  const clean = t => ({ id: t.id, src: t.src, title: t.title, artist: t.artist, album: t.album || '', genre: t.genre || '', duration: t.duration || 0, cover: t.cover || '', coverLg: t.coverLg || '', dl: !!t.dl, link: t.link || '', license: t.license || '', url: t.url || '', prev: !!t.prev });
-  const valid = t => t && /^(au|ja|ia|ov|it):[A-Za-z0-9._~-]+$/.test(t.id || '') && t.title;
+  const clean = t => ({ id: t.id, src: t.src, title: t.title, artist: t.artist, album: t.album || '', genre: t.genre || '', duration: t.duration || 0, cover: t.cover || '', coverLg: t.coverLg || '', dl: !!t.dl, link: t.link || '', license: t.license || '' });
+  const valid = t => t && /^(au|ja):[A-Za-z0-9]+$/.test(t.id || '') && t.title;
   const tmo = ms => (window.AbortSignal && AbortSignal.timeout) ? AbortSignal.timeout(ms) : undefined;
 
   /* ===================== Data tersimpan (localStorage) ===================== */
@@ -6154,7 +6451,6 @@ const RM = (() => {
   const dur = () => (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : ((cur() && cur().duration) || 0);
   const sid = t => t.id.slice(3);
   function streamUrls(t) {
-    if (t.url) return [t.url];
     const out = [];
     if (S.fnOk !== false) out.push(API + '?stream=' + encodeURIComponent(t.id));
     if (t.src === 'audius') out.push(AU_ROOT + '/v1/tracks/' + encodeURIComponent(sid(t)) + '/stream?app_name=' + APP);
@@ -6268,7 +6564,7 @@ const RM = (() => {
     if (!items || (!items.length && !p.trending)) items = (items && items.length) ? items : auList(await au('/tracks/search', { query: p.q, limit: 30 }));
     return { results: items, sources: { audius: 'ok', jamendo: 'off' }, via: 'direct' };
   }
-  async function apiBase(p) {
+  async function api(p) {
     let fnErr = null;
     if (S.fnOk !== false) {
       try {
@@ -6283,49 +6579,6 @@ const RM = (() => {
       if (fnErr && (fnErr.name === 'TimeoutError' || fnErr.name === 'AbortError')) throw new Error('Waktu koneksi habis. Coba lagi.');
       throw new Error(fnErr && fnErr.message && !/fetch|network|load failed/i.test(fnErr.message) ? fnErr.message : 'Gagal mengambil data musik. Periksa koneksi lalu coba lagi.');
     }
-  }
-
-  /* ===================== Sumber tambahan: Apple Music (pratinjau), Internet Archive, Openverse ===================== */
-  const jget = async (u, ms) => { const r = await fetch(u, { signal: tmo(ms || 9000) }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
-  const secs = v => { v = String(v || ''); if (v.includes(':')) return v.split(':').reduce((a, x) => a * 60 + (parseFloat(x) || 0), 0); return parseFloat(v) || 0; };
-  async function srcItunes(q, type) {
-    const attr = { track: 'songTerm', artist: 'artistTerm', album: 'albumTerm' }[type];
-    const d = await jget('https://itunes.apple.com/search?' + new URLSearchParams(Object.assign({ media: 'music', entity: 'song', limit: 25, country: 'ID', term: q }, attr ? { attribute: attr } : {})));
-    return (d.results || []).filter(x => x.trackId && /^https:/.test(x.previewUrl || '')).map(x => ({ id: 'it:' + x.trackId, src: 'itunes', title: x.trackName, artist: x.artistName, album: x.collectionName || '', genre: x.primaryGenreName || '', duration: 30, cover: x.artworkUrl100 || '', coverLg: (x.artworkUrl100 || '').replace(/\/\d+x\d+bb\.(jpg|png)$/, '/600x600bb.$1'), dl: false, prev: true, url: x.previewUrl, link: x.trackViewUrl || '', license: '' }));
-  }
-  async function srcArchive(q) {
-    const sp = new URLSearchParams({ q: '(' + q + ') AND mediatype:audio', rows: 10, output: 'json', 'sort[]': 'downloads desc' }); ['identifier', 'title', 'creator'].forEach(f => sp.append('fl[]', f));
-    const d = await jget('https://archive.org/advancedsearch.php?' + sp, 10000);
-    const docs = ((d.response || {}).docs || []).filter(x => /^[A-Za-z0-9._-]+$/.test(x.identifier || ''));
-    const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    const rs = await Promise.allSettled(docs.map(async x => {
-      const m = await jget('https://archive.org/metadata/' + x.identifier, 8000);
-      let fs = (m.files || []).filter(f => /\.mp3$/i.test(f.name || '')); if (!fs.length) fs = (m.files || []).filter(f => /\.ogg$/i.test(f.name || ''));
-      const mt = fs.filter(f => words.some(w => ((f.title || '') + ' ' + f.name).toLowerCase().includes(w))), lic = (m.metadata || {}).licenseurl || '', img = 'https://archive.org/services/img/' + x.identifier;
-      return (mt.length ? mt : fs).slice(0, 3).map(f => ({ id: 'ia:' + x.identifier + '~' + fs.indexOf(f), src: 'archive', title: f.title || x.title || f.name, artist: [].concat(x.creator || f.creator || 'Internet Archive').join(', '), album: x.title || '', genre: '', duration: Math.round(secs(f.length)), cover: img, coverLg: img, dl: true, url: 'https://archive.org/download/' + x.identifier + '/' + f.name.split('/').map(encodeURIComponent).join('/'), link: 'https://archive.org/details/' + x.identifier, license: /^https:/.test(lic) ? lic : '' }));
-    }));
-    return rs.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-  }
-  async function srcOpenverse(q) {
-    const d = await jget('https://api.openverse.org/v1/audio/?' + new URLSearchParams({ q, page_size: 15 }));
-    return (d.results || []).filter(x => /^https:/.test(x.url || '') && /^[0-9a-f-]{32,36}$/.test(x.id || '')).map(x => ({ id: 'ov:' + x.id.replace(/-/g, ''), src: 'openverse', title: x.title || 'Tanpa judul', artist: x.creator || 'Tidak diketahui', album: (x.audio_set || {}).title || '', genre: [].concat(x.genres || [])[0] || '', duration: Math.round((x.duration || 0) / 1000), cover: x.thumbnail || '', coverLg: x.thumbnail || '', dl: true, url: x.url, link: x.foreign_landing_url || '', license: x.license_url || '' }));
-  }
-  async function extra(p) {
-    const q = p.q, keys = p.type === 'genre' ? ['itunes'] : ['itunes', 'archive', 'openverse'];
-    const fns = { itunes: () => srcItunes(q, p.type), archive: () => srcArchive(q), openverse: () => srcOpenverse(q) };
-    const rs = await Promise.allSettled(keys.map(k => fns[k]())), results = [], sources = {};
-    rs.forEach((r, i) => { sources[keys[i]] = r.status === 'fulfilled' ? 'ok' : 'error'; if (r.status === 'fulfilled') results.push(...r.value); });
-    return { results, sources };
-  }
-  async function api(p) {
-    const [b, x] = await Promise.allSettled([apiBase(p), p.trending ? Promise.resolve(null) : extra(p)]);
-    const ex = x.status === 'fulfilled' ? x.value : null;
-    if (b.status === 'rejected' && !(ex && ex.results.length)) throw b.reason;
-    const base = b.status === 'fulfilled' ? b.value : { results: [], sources: {} };
-    if (!ex) return base;
-    const seen = new Set(), key = t => (t.title + '|' + t.artist).toLowerCase().replace(/[^a-z0-9]/g, '');
-    const all = (base.results || []).concat(ex.results.filter(t => !t.prev), ex.results.filter(t => t.prev)).filter(t => { const k = key(t); if (seen.has(k)) return false; seen.add(k); return true; });
-    return { results: all, sources: Object.assign({}, base.sources, ex.sources), via: base.via };
   }
 
   /* ===================== Download (hanya jika diizinkan) ===================== */
@@ -6344,22 +6597,21 @@ const RM = (() => {
   }
   async function download(t) {
     if (!t) return;
-    if (!t.dl) { Util.toast(t.prev ? 'Ini pratinjau 30 detik lagu komersial dan tidak bisa diunduh. Buka Apple Music untuk membeli, atau pilih "Cari versi lengkap".' : 'Download tidak tersedia: pemilik hak tidak mengizinkan lagu ini diunduh.'); return; }
+    if (!t.dl) { Util.toast('Download tidak tersedia: pemilik hak tidak mengizinkan lagu ini diunduh.'); return; }
     if (DL.has(t.id)) { Util.toast('Sedang diunduh...'); return; }
     const job = { t, p: 0 }; DL.set(t.id, job); emit('dl');
     const onp = p => { job.p = p; emit('dl'); };
     let info = null;
     try {
-      if (!t.url && S.fnOk !== false) {
+      if (S.fnOk !== false) {
         try { const r = await fetch(API + '?download=' + encodeURIComponent(t.id), { signal: tmo(15000) }); if ((r.headers.get('content-type') || '').includes('json')) { info = await r.json(); S.fnOk = true; } else S.fnOk = false; } catch (e) { if (S.fnOk) throw e; }
         if (info && info.allowed === false) { Util.toast(info.message || 'Download tidak tersedia untuk lagu ini.'); return; }
         if (info && !info.url) throw new Error(info.message || 'Server menolak');
       }
-      if (!info && t.url) info = { allowed: true, url: t.url, filename: fname(t.title + ' - ' + t.artist) };
       if (!info) { if (t.src !== 'audius') throw new Error('Backend download belum aktif'); info = { allowed: true, url: auBase + '/v1/tracks/' + encodeURIComponent(sid(t)) + '/download?app_name=' + APP, filename: fname(t.title + ' - ' + t.artist) }; }
       let res;
       try { res = await grab(info.url, onp); }
-      catch (e) { if (!S.fnOk || t.url) throw e; res = await grab(API + '?download=' + encodeURIComponent(t.id) + '&proxy=1', onp); }
+      catch (e) { if (!S.fnOk) throw e; res = await grab(API + '?download=' + encodeURIComponent(t.id) + '&proxy=1', onp); }
       const ext = EXT[res.type] || ((String(res.url || '').split('?')[0].match(/\.(mp3|flac|wav|aiff?|ogg|m4a|aac)$/i) || [])[1] || '').toLowerCase();
       dlBlob(res.blob, fname(info.filename || (t.title + ' - ' + t.artist)) + (ext ? '.' + ext : ''));
       Util.toast('Download selesai: ' + t.title);
@@ -6382,7 +6634,7 @@ const RM = (() => {
   };
   const I = (n, s) => '<svg width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>';
   const cov = (t, big) => okImg(big ? (t.coverLg || t.cover) : t.cover) ? '<img src="' + esc(big ? (t.coverLg || t.cover) : t.cover) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">' : '<span class="rm-ph">' + I('note', big ? 64 : 20) + '</span>';
-  const srcLabel = t => ({ jamendo: 'JAMENDO · CC', itunes: 'PRATINJAU 30 DTK', archive: 'INTERNET ARCHIVE', openverse: 'OPENVERSE · CC' })[t.src] || 'AUDIUS';
+  const srcLabel = t => t.src === 'jamendo' ? 'JAMENDO · CC' : 'AUDIUS';
 
   /* ===================== CSS (hanya untuk Ryntax Music, memakai variabel tema yang sudah ada) ===================== */
   const CSS = `
@@ -6518,7 +6770,7 @@ body.rm-on .rm-mini{display:block}
       '<div class="rm-acts">' +
       '<button type="button" class="icon-btn rm-ib rm-hide-sm" data-act="play" aria-label="Putar">' + I(c && S.playing ? 'pause' : 'play', 15) + '</button>' +
       '<button type="button" class="icon-btn rm-ib" data-act="like" aria-pressed="' + lk + '" aria-label="' + (lk ? 'Hapus dari' : 'Tambah ke') + ' Lagu Disukai">' + I('heart', 16) + '</button>' +
-      '<button type="button" class="icon-btn rm-ib" data-act="dl" aria-disabled="' + !t.dl + '" title="' + (t.dl ? 'Download (diizinkan pemilik hak)' : t.prev ? 'Pratinjau 30 detik, tidak bisa diunduh' : 'Download tidak tersedia') + '" aria-label="Download">' + I('dl', 16) + '</button>' +
+      '<button type="button" class="icon-btn rm-ib" data-act="dl" aria-disabled="' + !t.dl + '" title="' + (t.dl ? 'Download (diizinkan pemilik hak)' : 'Download tidak tersedia') + '" aria-label="Download">' + I('dl', 16) + '</button>' +
       (extra || '') +
       '<button type="button" class="icon-btn rm-ib" data-act="more" aria-label="Opsi lainnya">' + I('more', 16) + '</button>' +
       '</div></div>';
@@ -6538,12 +6790,7 @@ body.rm-on .rm-mini{display:block}
   }
   function srcNote(d) {
     if (!d) return '';
-    const pn = d.items && d.items.some(t => t.prev) ? '<p class="rm-note">Lagu komersial hanya tersedia sebagai pratinjau 30 detik (Apple Music). Download aktif untuk lagu yang diizinkan pemilik hak. Pilih "Cari versi lengkap" di menu ⋯ untuk mencari versi penuh.</p>' : '';
-    return pn + srcNote0(d);
-  }
-  function srcNote0(d) {
-    if (!d) return '';
-    if (d.via === 'direct') return '<p class="rm-note">Mode langsung: Netlify Function belum aktif, katalog Audius, Internet Archive, Openverse, dan pratinjau Apple Music yang dipakai.</p>';
+    if (d.via === 'direct') return '<p class="rm-note">Mode langsung: Netlify Function belum aktif, hanya katalog Audius yang dipakai.</p>';
     const s = d.sources || {}; const n = [];
     if (s.jamendo === 'nokey') n.push('Katalog Jamendo belum aktif (atur JAMENDO_CLIENT_ID di Netlify).');
     if (s.jamendo === 'error') n.push('Jamendo sedang tidak merespons.');
@@ -6572,8 +6819,7 @@ body.rm-on .rm-mini{display:block}
       if (r.loading) return '<p class="rm-st" aria-live="polite"><span class="is-busy">Mencari "' + esc(V.q) + '"</span></p>' + skel(6);
       if (r.error) return '<p class="rm-st" style="color:#d93a3a" aria-live="polite">' + esc(r.error) + '</p><button type="button" class="btn" data-research="1">Coba lagi</button>';
       if (!r.items.length) return srcNote(r) + empty('search', 'Lagu untuk "' + esc(V.q) + '" tidak ditemukan. Coba kata kunci atau jenis pencarian lain.');
-      const its = V.dlOnly ? r.items.filter(t => t.dl) : r.items, fl = '<button type="button" class="chip' + (V.dlOnly ? ' active' : '') + '" data-dlonly="1">' + I('dl', 13) + ' Bisa diunduh</button>';
-      return srcNote(r) + '<h3 class="rm-h"><span>' + its.length + ' lagu · "' + esc(V.q) + '"</span><button type="button" class="btn btn-primary" data-playall="res">' + I('play', 14) + ' Putar semua</button></h3>' + '<div class="rm-genres">' + fl + '</div>' + (its.length ? list(its, 'res') : empty('dl', 'Tidak ada lagu yang bisa diunduh di hasil ini.'));
+      return srcNote(r) + '<h3 class="rm-h"><span>' + r.items.length + ' lagu · "' + esc(V.q) + '"</span><button type="button" class="btn btn-primary" data-playall="res">' + I('play', 14) + ' Putar semua</button></h3>' + list(r.items, 'res');
     },
     queue() {
       const c = cur(), up = S.queue.slice(S.idx + 1);
@@ -6651,14 +6897,14 @@ body.rm-on .rm-mini{display:block}
       '<button class="btn" type="button" data-m="queue">' + I('queue', 16) + ' Tambah ke antrean</button>' +
       '<button class="btn" type="button" data-m="pl">' + I('plus', 16) + ' Tambah ke playlist</button>' +
       '<button class="btn" type="button" data-m="like">' + I('heart', 16) + ' ' + (L.liked(t.id) ? 'Hapus dari' : 'Simpan ke') + ' Lagu Disukai</button>' +
-      '<button class="btn" type="button" data-m="dl"' + (t.dl ? '' : ' aria-disabled="true" style="opacity:.55"') + '>' + I('dl', 16) + ' ' + (t.dl ? 'Download file asli' : t.prev ? 'Pratinjau, tidak bisa diunduh' : 'Download tidak tersedia') + '</button>' + (t.prev ? '<button class="btn" type="button" data-m="full">' + I('search', 16) + ' Cari versi lengkap</button>' : '') +
-      (/^https:\/\//.test(t.link) ? '<a class="btn" href="' + esc(t.link) + '" target="_blank" rel="noopener noreferrer">' + I('link', 16) + ' Buka di ' + (({ jamendo: 'Jamendo', itunes: 'Apple Music', archive: 'Internet Archive', openverse: 'sumber asli' })[t.src] || 'Audius') + '</a>' : '') +
+      '<button class="btn" type="button" data-m="dl"' + (t.dl ? '' : ' aria-disabled="true" style="opacity:.55"') + '>' + I('dl', 16) + ' ' + (t.dl ? 'Download file asli' : 'Download tidak tersedia') + '</button>' +
+      (/^https:\/\//.test(t.link) ? '<a class="btn" href="' + esc(t.link) + '" target="_blank" rel="noopener noreferrer">' + I('link', 16) + ' Halaman artis di ' + (t.src === 'jamendo' ? 'Jamendo' : 'Audius') + '</a>' : '') +
       (/^https:\/\//.test(t.license) ? '<a class="btn" href="' + esc(t.license) + '" target="_blank" rel="noopener noreferrer">' + I('link', 16) + ' Lisensi Creative Commons</a>' : '') +
       '<button class="btn" type="button" data-m="x">Tutup</button>', el => el.addEventListener('click', e => {
       const b = e.target.closest('[data-m]'); if (!b) return; const m = b.dataset.m;
       if (m === 'pl') { plMenu(); return; }
       closeSheet();
-      if (m === 'next') enqueue(t, true); else if (m === 'queue') enqueue(t, false); else if (m === 'like') L.like(t); else if (m === 'dl') download(t); else if (m === 'full') { const qi = $('#rm-q'); if (qi) qi.value = t.title + ' ' + t.artist; search(t.title + ' ' + t.artist, 'track'); }
+      if (m === 'next') enqueue(t, true); else if (m === 'queue') enqueue(t, false); else if (m === 'like') L.like(t); else if (m === 'dl') download(t);
     }));
     const plMenu = () => openSheet(head + '<b class="text-sm">Tambah ke playlist</b>' +
       '<button class="btn btn-primary" type="button" data-p="+">' + I('plus', 16) + ' Playlist baru</button>' +
@@ -6735,7 +6981,7 @@ body.rm-on .rm-mini{display:block}
     $$('[data-c=like]').forEach(b => { b.setAttribute('aria-pressed', lk); b.disabled = !t; });
     $$('[data-c=dl]').forEach(b => { b.setAttribute('aria-disabled', !(t && t.dl)); b.title = t && t.dl ? 'Download file asli' : 'Download tidak tersedia'; });
     np.classList.toggle('is-playing', S.playing); np.classList.toggle('rm-paused', !S.playing);
-    const msg = S.err ? '<span style="color:#d93a3a">' + esc(S.err) + '</span>' : S.loading ? 'Memuat audio...' : t ? '<span class="rm-src">' + srcLabel(t) + '</span>' + (t.prev ? 'Pratinjau 30 detik' : 'Lagu penuh') + ' · ' + fmt(d) : '';
+    const msg = S.err ? '<span style="color:#d93a3a">' + esc(S.err) + '</span>' : S.loading ? 'Memuat audio...' : t ? '<span class="rm-src">' + srcLabel(t) + '</span>Lagu penuh · ' + fmt(d) : '';
     $('.rm-msg', np).innerHTML = msg;
     if (kind === 'track' || kind === 'queue' || kind === 'lib') {
       $('.rm-mcv', mini).innerHTML = t ? cov(t) : '<span class="rm-ph">' + I('note', 20) + '</span>';
@@ -6758,7 +7004,7 @@ body.rm-on .rm-mini{display:block}
 
   function mount(root) {
     build();
-    root.innerHTML = '<div class="rm"><div class="rm-brand"><span class="rm-logo">' + I('note', 24) + '</span><div><span class="rm-title">RYNTAX MUSIC</span><span class="muted text-xs font-bold">Cari lagu apa saja · Audius, Jamendo, Internet Archive, Openverse &amp; pratinjau Apple Music</span></div></div>' +
+    root.innerHTML = '<div class="rm"><div class="rm-brand"><span class="rm-logo">' + I('note', 24) + '</span><div><span class="rm-title">RYNTAX MUSIC</span><span class="muted text-xs font-bold">Streaming lagu penuh dari sumber legal · Audius &amp; Jamendo</span></div></div>' +
       '<form class="rm-search" data-form="search" role="search"><input class="field" id="rm-q" type="search" enterkeyhint="search" autocomplete="off" maxlength="120" placeholder="Cari judul, artis, band, album, atau genre" aria-label="Kata kunci" value="' + esc(V.q) + '"><select class="field" id="rm-type" aria-label="Jenis pencarian">' + [['all', 'Semua'], ['track', 'Judul'], ['artist', 'Artis/Band'], ['album', 'Album'], ['genre', 'Genre']].map(o => '<option value="' + o[0] + '"' + (o[0] === V.type ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select><button class="btn btn-primary" type="submit">' + I('search', 15) + ' Cari</button></form>' +
       '<div class="rm-tabs" role="tablist">' + TABS.map(x => '<button type="button" class="chip" role="tab" data-tab="' + x[0] + '">' + I(x[2], 14) + x[1] + '</button>').join('') + '</div>' +
       '<div id="rm-view"></div></div>';
@@ -6772,7 +7018,6 @@ body.rm-on .rm-mini{display:block}
       const tb = e.target.closest('[data-tab]'); if (tb) { go(tb.dataset.tab); return; }
       const g = e.target.closest('[data-genre]'); if (g) { $('#rm-q', root).value = (GEN.find(x => x[0] === g.dataset.genre) || [0, g.dataset.genre])[1]; $('#rm-type', root).value = 'genre'; search(g.dataset.genre, 'genre'); return; }
       const h = e.target.closest('[data-hist]'); if (h) { const x = L.hist[+h.dataset.hist]; if (x) { $('#rm-q', root).value = x.q; $('#rm-type', root).value = x.type || 'all'; search(x.q, x.type); } return; }
-      if (e.target.closest('[data-dlonly]')) { V.dlOnly = !V.dlOnly; render(); return; }
       if (e.target.closest('[data-research]')) { search(V.q, V.type); return; }
       const rt = e.target.closest('[data-retry]'); if (rt) { delete V.rec[rt.dataset.retry.slice(4)]; render(); return; }
       const op = e.target.closest('[data-openpl]'); if (op) { V.pl = op.dataset.openpl; go('playlists'); return; }
@@ -6819,7 +7064,7 @@ body.rm-on .rm-mini{display:block}
 
 registerTool({
   id: 'ryntax-music', name: 'Ryntax Music', category: 'Media', badge: 'PREMIUM',
-  description: 'Cari lagu apa saja, putar, antrean, playlist, lagu disukai, dan download file asli untuk lagu yang diizinkan.',
+  description: 'Streaming lagu penuh: cari, putar, antrean, playlist, lagu disukai, dan download legal.',
   keywords: 'musik lagu music spotify streaming putar cari audio player playlist antrean queue favorit download audius jamendo',
   icon: '<circle cx="8" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M11 18V6l10-2v12"/>',
   mount(root) { RM.mount(root); }
@@ -19366,8 +19611,8 @@ function mountRealTool(tool, holder) {
   // Kelompok yang ditentukan manual (tool sejenis dari berbagai aplikasi)
   const FAMILIES = [
     { id: 'downloader', name: 'Downloader', icon: 'fas fa-download', first: true,
-      desc: 'Unduh video & audio dari berbagai aplikasi: TikTok, Instagram, YouTube.',
-      ids: ['tiktok-dl', 'instagram-dl', 'youtube-dl'] },
+      desc: 'Unduh video, audio & file dari berbagai aplikasi: Apple Music, Facebook, Instagram, MediaFire, Sfile, Snackvideo, Spotify, TikTok, X, YouTube.',
+      ids: ['applemusic-dl', 'fb-video-dl', 'instagram-dl', 'mediafire-dl', 'sfile-dl', 'snackvideo-dl', 'spotify-dl', 'tiktok-dl', 'twitter-x-dl', 'youtube-dl'] },
     { id: 'upload-link', name: 'Upload ke Link', icon: 'fas fa-cloud-arrow-up',
       desc: 'Ubah foto, file, atau video jadi tautan yang bisa dibagikan.',
       ids: ['foto-ke-link', 'file-ke-link', 'video-ke-url'] },
@@ -21932,7 +22177,7 @@ dlStatus({ id: 'universal-url-dl', name: 'Universal URL Downloader', keywords: '
 /* ---------- AI Tools (lokal nyata; mode AI siap dikonfigurasi) ---------- */
 registerTool({ id: 'ai-summarizer', name: 'AI Ringkasan Teks', category: 'AI', badge: 'BERFUNGSI', description: 'Ringkas panjang langsung di browser (ekstraktif) + mode AI bila endpoint ada.', keywords: 'ringkas summary rangkum abstrak inti kalimat ai', icon: '<path d="M4 6h16M4 10h16M4 14h10M4 18h7"/>',
   mount(root) {
-    root.innerHTML = '<label class="text-sm font-semibold block mb-2">Teks panjang</label><textarea id="sm-in" class="field" rows="9" placeholder="Tempel artikel atau catatan panjang di sini…"></textarea><div class="flex flex-wrap items-center gap-3 mt-2"><label class="text-sm font-semibold">Jumlah kalimat <select id="sm-n" class="field" style="width:auto"><option>3</option><option selected>5</option><option>8</option></select></label><button id="sm-go" class="btn btn-primary">Ringkas (Lokal)</button><button id="sm-ai" class="btn" title="Butuh ENDPOINTS.ai">Mode AI</button><button id="sm-cp" class="btn">Salin</button></div><div id="sm-out" class="stat mt-3" style="white-space:pre-wrap"></div>';
+    root.innerHTML = '<label class="text-sm font-semibold block mb-2">Teks panjang</label><textarea id="sm-in" class="field" rows="9" placeholder="Tempel artikel atau catatan panjang di sini…"></textarea><div class="flex flex-wrap items-center gap-3 mt-2"><label class="text-sm font-semibold">Jumlah kalimat <select id="sm-n" class="field" style="width:auto"><option>3</option><option selected>5</option><option>8</option></select></label><button id="sm-go" class="btn btn-primary">Ringkas (Lokal)</button><button id="sm-ai" class="btn" title="Memakai Nexa AI">Mode AI</button><button id="sm-cp" class="btn">Salin</button></div><div id="sm-out" class="stat mt-3" style="white-space:pre-wrap"></div>';
     const stop = new Set('yang untuk dengan pada dalam adalah yaitu yaitu bahwa ini itu dari ke atau dan juga saya kamu dia mereka kita pada dengan akan sudah bisa akan tidak ada ini itu atau oleh seperti lebih yaitu yaitu'.split(' '));
     Q('#sm-go', root).onclick = () => {
       const text = Q('#sm-in', root).value.trim(); if (!text) return;
@@ -21943,9 +22188,10 @@ registerTool({ id: 'ai-summarizer', name: 'AI Ringkasan Teks', category: 'AI', b
       Q('#sm-out', root).textContent = top.map(t => t.s).join(' ') + '\n\n(' + top.length + ' dari ' + sents.length + ' kalimat, peringkat frekuensi kata lokal.)';
     };
     Q('#sm-ai', root).onclick = async () => {
-      if (!ENDPOINTS.ai) { Q('#sm-out', root).textContent = 'Mode AI: ENDPOINTS.ai kosong. Sambungkan endpoint OpenAI-compatible di Ryntax AI untuk ringkasan generatif.'; return; }
-      try { const r = await fetch(ENDPOINTS.ai, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'Ringkas teks ini dalam 5 kalimat padat:\n' + Q('#sm-in', root).value }] }) }); const d = await r.json(); Q('#sm-out', root).textContent = d.reply || (d.choices && d.choices[0].message.content) || 'Respons tidak dikenali.'; }
-      catch (e) { Q('#sm-out', root).textContent = 'Gagal menghubungi AI: ' + e.message; }
+      const txt = Q('#sm-in', root).value.trim(), out = Q('#sm-out', root); if (!txt) return;
+      out.textContent = 'Nexa AI sedang meringkas…';
+      try { out.textContent = (await window.NexaAI.ask('Ringkas teks ini dalam ' + Q('#sm-n', root).value + ' kalimat padat:\n' + txt.slice(0, 2500))) + (txt.length > 2500 ? '\n\n(Catatan: hanya 2.500 karakter pertama yang diringkas.)' : ''); }
+      catch (e) { out.textContent = 'Gagal menghubungi Nexa AI: ' + e.message; }
     };
     Q('#sm-cp', root).onclick = () => Util.copy(Q('#sm-out', root).textContent);
   } });
@@ -22649,14 +22895,14 @@ function localReply(q) {
 }
 
 RT.page_ai = function (sec) {
-  const configured = !!(ENDPOINTS.ai || ENDPOINTS.gemini);
+  const configured = true; /* Nexa AI selalu aktif */
   sec.innerHTML =
     '<div class="rt-page-head" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
       '<div><h2 style="display:flex;gap:10px;align-items:center"><i class="fas fa-robot" style="color:#7dd3fc"></i> Ryntax AI</h2>' +
       '<p style="color:var(--rt-muted);font-size:.82rem;margin-top:4px">Riwayat tersimpan lokal. Kunci API tidak pernah dikirim ke kode situs.</p></div>' +
       '<div class="flex gap-2 flex-wrap"><button class="rt-btn primary" id="ai-new"><i class="fas fa-plus"></i> Percakapan Baru</button><button class="rt-btn ghost" id="ai-clear"><i class="fas fa-eraser"></i> Bersihkan</button></div></div>' +
     '<div class="rt-card" id="ai-status" style="margin-bottom:14px;border-left:3px solid ' + (configured ? '#22c55e' : '#f59e0b') + ';font-size:.83rem;padding:12px 14px">' +
-      (configured ? '<i class="fas fa-plug-circle-check" style="color:#4ade80"></i> <b>Konfigurasi AI terdeteksi.</b> Pesan dikirim ke ENDPOINTS terisi saat Anda mengirim; bila server gagal merespons, sistem memakai bantuan templat lokal. Kunci API tetap harus berada di sisi server.' : '<i class="fas fa-triangle-exclamation" style="color:#fbbf24"></i> <b>Belum terhubung:</b> ENDPOINTS.ai dan ENDPOINTS.gemini kosong. Jawaban di bawah adalah bantuan templat lokal, bukan model bahasa besar.') + '</div>' +
+      (configured ? '<i class="fas fa-plug-circle-check" style="color:#4ade80"></i> <b>Terhubung ke Nexa AI (GPT-4).</b> Jawaban diambil dari api.nexadev.my.id; bila layanan gagal merespons, sistem memakai bantuan templat lokal.' : '<i class="fas fa-triangle-exclamation" style="color:#fbbf24"></i> <b>Belum terhubung:</b> ENDPOINTS.ai dan ENDPOINTS.gemini kosong. Jawaban di bawah adalah bantuan templat lokal, bukan model bahasa besar.') + '</div>' +
     '<div style="display:grid;grid-template-columns:240px 1fr;gap:14px;min-height:60vh" class="ai-wrap">' +
       '<aside class="rt-card" id="ai-list" style="padding:12px;max-height:66vh;overflow:auto"></aside>' +
       '<div class="rt-card" style="display:flex;flex-direction:column;min-height:60vh;overflow:hidden"><div id="ai-msgs" style="flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px"></div>' +
@@ -22688,27 +22934,24 @@ RT.page_ai = function (sec) {
     renderList();
     const c = RT.ai.current();
     if (!c) { msgsEl.innerHTML = '<div class="rt-msg" style="margin:auto;color:var(--rt-muted)">Mulai percakapan baru untuk melihat riwayat di sini.</div>'; return; }
-    msgsEl.innerHTML = c.msgs.map(m => '<div class="rt-msg ' + m.role + '" style="max-width:82%;' + (m.role === 'user' ? 'margin-left:auto;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff' : 'background:var(--rt-surface2,rgba(255,255,255,.06))') + ';padding:11px 14px;border-radius:14px;white-space:pre-wrap;line-height:1.55;font-size:.88rem">' + esc(m.content) + (m.role === 'assistant' ? '<div style="display:flex;gap:8px;margin-top:8px"><button class="rt-btn ghost" data-copy style="padding:3px 10px;min-height:28px;font-size:.72rem"><i class="fas fa-copy"></i> Salin</button><button class="rt-btn ghost" data-regen style="padding:3px 10px;min-height:28px;font-size:.72rem"><i class="fas fa-rotate"></i> Regenerate</button></div>' : '') + '</div>').join('');
+    msgsEl.innerHTML = c.msgs.map(m => '<div class="rt-msg ' + m.role + '" style="max-width:82%;' + (m.role === 'user' ? 'margin-left:auto;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff' : 'background:var(--rt-surface2,rgba(255,255,255,.06))') + ';padding:11px 14px;border-radius:14px;white-space:pre-wrap;line-height:1.55;font-size:.88rem">' + (m.role === 'assistant' ? window.NexaAI.format(m.content) : esc(m.content)) + (m.role === 'assistant' ? '<div style="display:flex;gap:8px;margin-top:8px"><button class="rt-btn ghost" data-copy style="padding:3px 10px;min-height:28px;font-size:.72rem"><i class="fas fa-copy"></i> Salin</button><button class="rt-btn ghost" data-regen style="padding:3px 10px;min-height:28px;font-size:.72rem"><i class="fas fa-rotate"></i> Regenerate</button></div>' : '') + '</div>').join('');
     $$('[data-copy]', msgsEl).forEach(b => b.onclick = () => Util.copy(b.closest('.rt-msg').innerText.replace(/Salin|Regenerate/g, '').trim()));
     $$('[data-regen]', msgsEl).forEach(b => b.onclick = () => regen());
     msgsEl.scrollTop = msgsEl.scrollHeight;
   }
   async function send() {
-    const inp = $('#ai-in', sec); const q = inp.value.trim(); if (!q) return;
+    if (sec._aiBusy) return; const inp = $('#ai-in', sec); const q = inp.value.trim(); if (!q) return;
     let c = RT.ai.current(); if (!c) c = RT.ai.newConvo();
     c.msgs.push({ role: 'user', content: q, at: Date.now() });
     if (c.msgs.length === 1) c.title = q.slice(0, 34) + (q.length > 34 ? '…' : '');
     inp.value = ''; RT.ai.save(); render();
     let reply;
     if (!configured) { reply = localReply(q); c.msgs.push({ role: 'assistant', content: reply, at: Date.now() }); RT.ai.save(); render(); return; }
-    const ep = ENDPOINTS.ai || ENDPOINTS.gemini;
-    msgsEl.insertAdjacentHTML('beforeend', '<div class="rt-msg" id="ai-typing" style="opacity:.7;font-size:.83rem">Ryntax AI sedang menulis…</div>');
-    try {
-      const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: c.msgs.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) }) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const d = await r.json();
-      reply = d.reply || (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || (d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts.map(p => p.text).join(' ')) || 'Respons diterima tetapi formatnya tidak dikenali.';
-    } catch (e) { reply = localReply(q) + '\n\n(Catatan: koneksi layanan AI gagal: ' + e.message + '; pesan di bawah ini bantuan templat lokal.)'; }
+    sec._aiBusy = true;
+    msgsEl.insertAdjacentHTML('beforeend', '<div class="rt-msg" id="ai-typing" style="opacity:.7;font-size:.83rem">Nexa AI sedang menulis…</div>'); msgsEl.scrollTop = msgsEl.scrollHeight;
+    try { reply = await window.NexaAI.ask(q, c.msgs.slice(0, -1)); }
+    catch (e) { reply = localReply(q) + '\n\n(Catatan: koneksi ke Nexa AI gagal: ' + e.message + ' Jawaban di atas adalah bantuan templat lokal.)'; }
+    sec._aiBusy = false;
     $('#ai-typing', msgsEl)?.remove();
     c.msgs.push({ role: 'assistant', content: reply, at: Date.now() }); RT.ai.save(); render();
   }
@@ -22718,10 +22961,9 @@ RT.page_ai = function (sec) {
     c.msgs = c.msgs.filter(m => m.role !== 'assistant'); RT.ai.save(); render();
     if (!configured) { c.msgs.push({ role: 'assistant', content: localReply(lastUser.content), at: Date.now() }); RT.ai.save(); render(); return; }
     try {
-      const r = await fetch(ENDPOINTS.ai || ENDPOINTS.gemini, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: c.msgs.map(m => ({ role: m.role, content: m.content })) }) });
-      const d = await r.json(); const reply = d.reply || (d.choices && d.choices[0].message.content) || 'Respons tidak dikenali.';
+      const reply = await window.NexaAI.ask(lastUser.content, c.msgs.filter(m => m !== lastUser));
       c.msgs.push({ role: 'assistant', content: reply, at: Date.now() });
-    } catch (e) { c.msgs.push({ role: 'assistant', content: localReply(lastUser.content) + '\n\n(Regenerate gagal terhubung ke layanan: ' + e.message + ')', at: Date.now() }); }
+    } catch (e) { c.msgs.push({ role: 'assistant', content: localReply(lastUser.content) + '\n\n(Regenerate gagal terhubung ke Nexa AI: ' + e.message + ')', at: Date.now() }); }
     RT.ai.save(); render();
   }
   $('#ai-send', sec).onclick = send;
